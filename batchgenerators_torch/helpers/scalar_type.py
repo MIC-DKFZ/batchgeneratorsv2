@@ -5,7 +5,7 @@ import numpy as np
 ScalarType = Union[int, float, Tuple[float, float], Callable[..., Union[int, float]]]
 
 
-def sample_scalar(scalar_type: ScalarType, *args):
+def sample_scalar(scalar_type: ScalarType, *args, **kwargs):
     if isinstance(scalar_type, (int, float)):
         return scalar_type
     elif isinstance(scalar_type, (list, tuple)):
@@ -16,7 +16,7 @@ def sample_scalar(scalar_type: ScalarType, *args):
             return scalar_type[0]
         return np.random.uniform(*scalar_type)
     elif callable(scalar_type):
-        return scalar_type(*args)
+        return scalar_type(*args, **kwargs)
     else:
         raise RuntimeError('Unknown type: %s. Expected: int, float, list, tuple, callable', type(scalar_type))
 
