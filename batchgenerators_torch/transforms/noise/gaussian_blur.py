@@ -57,6 +57,8 @@ class GaussianBlurTransform(ImageOnlyTransform):
         return dct
 
     def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
+        if len(params['apply_to_channel']) == 0:
+            return img
         dim = len(img.shape[1:])
         # print(params['sigmas'])
         if self.synchronize_channels:

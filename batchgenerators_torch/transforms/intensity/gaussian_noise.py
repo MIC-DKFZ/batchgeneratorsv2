@@ -57,19 +57,24 @@ if __name__ == "__main__":
 
     gnt = GaussianNoiseTransform((0, 0.1), 1, False)
 
-    data_dict = {'image': torch.ones((2, 32, 32, 32))}
-    st = time()
+    times = []
     for _ in range(1000):
+        data_dict = {'image': torch.ones((2, 32, 32, 32))}
+        st = time()
         out = gnt(**data_dict)
-    print('torch', time() - st)
+        times.append(time() - st)
+    print('torch', np.mean(times))
 
     from batchgenerators.transforms.noise_transforms import GaussianNoiseTransform
 
     gnt_bg = GaussianNoiseTransform((0, 0.1), 1, 1, True)
-    data_dict = {'data': np.ones((1, 2, 32, 32, 32))}
-    st = time()
-    for _ in range(1000):
-        out = gnt_bg(**data_dict)
-    print('bg', time() - st)
 
+    times = []
+    for _ in range(1000):
+        data_dict = {'data': np.ones((1, 2, 32, 32, 32))}
+        st = time()
+        out = gnt_bg(**data_dict)
+        times.append(time() - st)
+
+    print('bg', np.mean(times))
     # torch is 2.5x faster
