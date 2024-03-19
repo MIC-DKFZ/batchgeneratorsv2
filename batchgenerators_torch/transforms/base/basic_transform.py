@@ -23,6 +23,9 @@ class BasicTransform(abc.ABC):
         if data_dict.get('image') is not None:
             data_dict['image'] = self._apply_to_image(data_dict['image'], **params)
 
+        if data_dict.get('regression_target') is not None:
+            data_dict['regression_target'] = self._apply_to_segmentation(data_dict['regression_target'], **params)
+
         if data_dict.get('segmentation') is not None:
             data_dict['segmentation'] = self._apply_to_segmentation(data_dict['segmentation'], **params)
 
@@ -35,6 +38,9 @@ class BasicTransform(abc.ABC):
         return data_dict
 
     def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
+        pass
+
+    def _apply_to_regr_target(self, regression_target, **params) -> torch.Tensor:
         pass
 
     def _apply_to_segmentation(self, segmentation: torch.Tensor, **params) -> torch.Tensor:
