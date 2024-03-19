@@ -1,3 +1,4 @@
+import os
 from typing import Tuple
 
 from batchgenerators_torch.helpers.scalar_type import ScalarType, sample_scalar
@@ -48,7 +49,27 @@ class GaussianNoiseTransform(ImageOnlyTransform):
 
 
 if __name__ == "__main__":
-    gnt = GaussianNoiseTransform(0.5, 1, True)
+    from time import time
+    import numpy as np
+
+    os.environ['OMP_NUM_THREADS'] = '1'
+    torch.set_num_threads(1)
+
+    gnt = GaussianNoiseTransform((0, 0.1), 1, False)
 
     data_dict = {'image': torch.ones((2, 32, 32, 32))}
-    out = gnt(**data_dict)
+    st = time()
+    for _ in range(1000):
+        out = gnt(**data_dict)
+    print('torch', time() - st)
+
+    from batchgenerators.transforms.noise_transforms import GaussianNoiseTransform
+
+    gnt_bg = GaussianNoiseTransform((0, 0.1), 1, 1, True)
+    data_dict = {'data': np.ones((1, 2, 32, 32, 32))}
+    st = time()
+    for _ in range(1000):
+        out = gnt_bg(**data_dict)
+    print('bg', time() - st)
+
+    # torch is 2.5x faster
