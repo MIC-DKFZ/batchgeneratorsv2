@@ -68,7 +68,7 @@ if __name__ == '__main__':
     mbt = SimulateLowResolutionTransform((0.1, 1.), synchronize_channels=False, synchronize_axes=False, ignore_axes=None, allowed_channels=None, p_per_channel=1)
 
     times_torch = []
-    for _ in range(15):
+    for _ in range(30):
         data_dict = {'image': torch.ones((3, 128, 192, 64))}
         st = time()
         out = mbt(**data_dict)
@@ -77,9 +77,9 @@ if __name__ == '__main__':
 
     from batchgenerators.transforms.resample_transforms import SimulateLowResolutionTransform as SLRT
 
-    gnt_bg = SLRT((0.1, 1), True, p_per_channel=1, order_downsample=0, order_upsample=3, p_per_sample=1)
+    gnt_bg = SLRT((0.1, 1), True, p_per_channel=1, order_downsample=0, order_upsample=1, p_per_sample=1)
     times_bg = []
-    for _ in range(15):
+    for _ in range(30):
         data_dict = {'data': np.ones((1, 3, 128, 192, 64))}
         st = time()
         out = gnt_bg(**data_dict)
