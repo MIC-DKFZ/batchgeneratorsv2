@@ -83,7 +83,7 @@ class ImageOnlyTransform(BasicTransform):
 class SegOnlyTransform(BasicTransform):
     def apply(self, data_dict: dict, **params) -> dict:
         if data_dict.get('segmentation') is not None:
-            data_dict['segmentation'] = self._apply_to_image(data_dict['segmentation'], **params)
+            data_dict['segmentation'] = self._apply_to_segmentation(data_dict['segmentation'], **params)
         return data_dict
 
 
