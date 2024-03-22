@@ -1,37 +1,55 @@
 import torch
 import numpy as np
 from time import time
+import pandas as pd
+
+def unique_torch(tensor):
+    return torch.unique(tensor)
+
+def unique_npy(tensor):
+    return np.unique(tensor.numpy())
+
+def unique_pandas(tensor):
+    np.sort(pd.unique(tensor.numpy().ravel()))
+
+def unique_bincount(tensor):
+    return torch.where(torch.bincount(tensor.ravel()) > 0)[0]
 
 
 if __name__ == '__main__':
     torch.set_num_threads(1)
+    shape = (64, 64, 64)
+    labels = 200
 
-    shape = (2, 4, 128, 128, 128)
-    print('gaussian noise')
-    st = time()
-    a = np.random.normal(0, 1, size=shape)
-    print(f'numpy: {time() - st}')
+    times = []
+    for _ in range(10):
+        seg = torch.round(torch.rand(shape) * 20, decimals=0).to(torch.uint8)
+        st = time()
+        unique = unique_torch(seg)
+        times.append(time() - st)
+    print('unique_torch', np.median(times))
 
-    st = time()
-    b = torch.from_numpy(a)
-    b = torch.normal(0, 1, size=shape)
-    b = b.numpy()
-    print(f'torch: {time() - st}')
+    times = []
+    for _ in range(10):
+        seg = torch.round(torch.rand(shape) * 20, decimals=0).to(torch.uint8)
+        st = time()
+        unique = unique_npy(seg)
+        times.append(time() - st)
+    print('unique_npy', np.median(times))
 
-    import torch
-    from time import time
+    times = []
+    for _ in range(10):
+        seg = torch.round(torch.rand(shape) * 20, decimals=0).to(torch.uint8)
+        st = time()
+        unique = unique_pandas(seg)
+        times.append(time() - st)
+    print('unique_pandas', np.median(times))
 
-    torch.set_num_threads(1)
-
-    inp = torch.rand((128, 128, 128), device='cpu')
-    st = time()
-    for _ in range(100):
-        _ = torch.std_mean(inp)
-    print('cpu std_mean', time() - st)
-    inp = torch.rand((128, 128, 128), device='cpu')
-    st = time()
-    for _ in range(100):
-        _ = torch.std(inp)
-        _ = torch.mean(inp)
-    print('cpu separate', time() - st)
+    times = []
+    for _ in range(10):
+        seg = torch.round(torch.rand(shape) * 20, decimals=0).to(torch.uint8)
+        st = time()
+        unique = unique_bincount(seg)
+        times.append(time() - st)
+    print('unique_bincount', np.median(times))
 

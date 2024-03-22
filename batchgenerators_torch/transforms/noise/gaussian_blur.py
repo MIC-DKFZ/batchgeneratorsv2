@@ -3,11 +3,70 @@ from copy import deepcopy
 import numpy as np
 from time import time
 import torch
+from scipy.ndimage import fourier_gaussian
+from skimage.data import camera
 from torch.nn.functional import pad, conv3d, conv1d, conv2d
 
 from batchgenerators_torch.helpers.scalar_type import ScalarType, sample_scalar
 from batchgenerators_torch.transforms.base.basic_transform import ImageOnlyTransform
 from fft_conv_pytorch import fft_conv
+
+
+def blur_dimension(img: torch.Tensor, sigma: float, dim_to_blur: int, force_use_fft: bool = None, truncate: float = 6):
+    """
+    Smoothes an input image with a 1D Gaussian kernel along the specified dimension.
+    The function supports 1D, 2D, and 3D images.
+
+    :param img: Input image tensor with shape (C, X), (C, X, Y), or (C, X, Y, Z),
+                where C is the channel dimension and X, Y, Z are spatial dimensions.
+    :param sigma: The standard deviation of the Gaussian kernel.
+    :param dim_to_blur: The dimension along which to apply the Gaussian blur (0 for X, 1 for Y, 2 for Z).
+    :return: The blurred image tensor.
+    """
+    assert img.ndim - 1 > dim_to_blur, "dim_to_blur must be a valid spatial dimension of the input image."
+    # Adjustments for kernel based on image dimensions
+    spatial_dims = img.ndim - 1  # Number of spatial dimensions in the input image
+    kernel = _build_kernel(sigma, truncate=truncate)
+
+    ksize = kernel.shape[0]
+
+    # Dynamically set up padding, convolution operation, and kernel shape based on the number of spatial dimensions
+    conv_ops = {1: conv1d, 2: conv2d, 3: conv3d}
+    if force_use_fft is not None:
+        conv_op = conv_ops[spatial_dims] if not force_use_fft else fft_conv
+    else:
+        conv_op = conv_ops[spatial_dims]
+
+    # Adjust kernel and padding for the specified blur dimension and input dimensions
+    if spatial_dims == 1:
+        kernel = kernel[None, None, :]
+        padding = [ksize // 2, ksize // 2]
+    elif spatial_dims == 2:
+        if dim_to_blur == 0:
+            kernel = kernel[None, None, :, None]
+            padding = [0, 0, ksize // 2, ksize // 2]
+        else:  # dim_to_blur == 1
+            kernel = kernel[None, None, None, :]
+            padding = [ksize // 2, ksize // 2, 0, 0]
+    else:  # spatial_dims == 3
+        # Expand kernel and adjust padding based on the blur dimension
+        if dim_to_blur == 0:
+            kernel = kernel[None, None, :, None, None]
+            padding = [0, 0, 0, 0, ksize // 2, ksize // 2]
+        elif dim_to_blur == 1:
+            kernel = kernel[None, None, None, :, None]
+            padding = [0, 0, ksize // 2, ksize // 2, 0, 0]
+        else:  # dim_to_blur == 2
+            kernel = kernel[None, None, None, None, :]
+            padding = [ksize // 2, ksize // 2, 0, 0, 0, 0]
+
+    # Apply padding
+    img_padded = pad(img, padding, mode="reflect")
+
+    # Apply convolution
+    # remember that weights are [c_out, c_in, ...]
+    img_blurred = conv_op(img_padded[None], kernel.expand(img_padded.shape[0], *[-1] * (kernel.ndim - 1)), groups=img_padded.shape[0])[0]
+    return img_blurred
 
 
 class GaussianBlurTransform(ImageOnlyTransform):
@@ -60,13 +119,14 @@ class GaussianBlurTransform(ImageOnlyTransform):
         if len(params['apply_to_channel']) == 0:
             return img
         dim = len(img.shape[1:])
+
         # print(params['sigmas'])
         if self.synchronize_channels:
             # we can compute that in one go as the conv implementation supports arbitrary input channels (with expanded kernel)
             for d in range(dim):
                 # print(d, params['sigmas'][d])
                 if not self.benchmark:
-                    img[params['apply_to_channel']] = self.blur_dimension(img[params['apply_to_channel']], params['sigmas'][d], d)
+                    img[params['apply_to_channel']] = blur_dimension(img[params['apply_to_channel']], params['sigmas'][d], d)
                 else:
                     img[params['apply_to_channel']] = self._benchmark_wrapper(img[params['apply_to_channel']], params['sigmas'][d], d)
         else:
@@ -76,7 +136,7 @@ class GaussianBlurTransform(ImageOnlyTransform):
                 for d in range(dim):
                     # print(i, d, params['sigmas'][i][d])
                     if not self.benchmark:
-                        img[i:i+1] = self.blur_dimension(img[i:i+1], params['sigmas'][i][d], d)
+                        img[i:i+1] = blur_dimension(img[i:i+1], params['sigmas'][i][d], d)
                     else:
                         img[i:i+1] = self._benchmark_wrapper(img[i:i+1], params['sigmas'][i][d], d)
         return img
@@ -86,7 +146,7 @@ class GaussianBlurTransform(ImageOnlyTransform):
         shp = img.shape[dim_to_blur + 1]
         # check if we already benchmarked this
         if shp in self.benchmark_use_fft.keys() and kernel_size in self.benchmark_use_fft[shp].keys():
-            return self.blur_dimension(img, sigma, dim_to_blur, force_use_fft=self.benchmark_use_fft[shp][kernel_size])
+            return blur_dimension(img, sigma, dim_to_blur, force_use_fft=self.benchmark_use_fft[shp][kernel_size])
         else:
             # let's not mess up the original image!
             if shp not in self.benchmark_use_fft.keys():
@@ -95,80 +155,23 @@ class GaussianBlurTransform(ImageOnlyTransform):
             times_nonfft = []
             for _ in range(self.benchmark_num_runs):
                 st = time()
-                self.blur_dimension(dummy_img, sigma, dim_to_blur, force_use_fft=False)
+                blur_dimension(dummy_img, sigma, dim_to_blur, force_use_fft=False)
                 times_nonfft.append(time() - st)
             times_fft = []
             for _ in range(self.benchmark_num_runs):
                 st = time()
-                self.blur_dimension(dummy_img, sigma, dim_to_blur, force_use_fft=True)
+                blur_dimension(dummy_img, sigma, dim_to_blur, force_use_fft=True)
                 times_fft.append(time() - st)
             # print(shp, kernel_size, np.median(times_fft), np.median(times_nonfft), np.median(times_fft) < np.median(times_nonfft))
             self.benchmark_use_fft[shp][kernel_size] = np.median(times_fft) < np.median(times_nonfft)
             # convenience stuff
             self.benchmark_use_fft[shp] = dict(sorted(self.benchmark_use_fft[shp].items()))
             # now create the real return value
-            return self.blur_dimension(img, sigma, dim_to_blur, force_use_fft=self.benchmark_use_fft[shp][kernel_size])
-
-    def blur_dimension(self, img: torch.Tensor, sigma: float, dim_to_blur: int, force_use_fft: bool = None):
-        """
-        Smoothes an input image with a 1D Gaussian kernel along the specified dimension.
-        The function supports 1D, 2D, and 3D images.
-
-        :param img: Input image tensor with shape (C, X), (C, X, Y), or (C, X, Y, Z),
-                    where C is the channel dimension and X, Y, Z are spatial dimensions.
-        :param sigma: The standard deviation of the Gaussian kernel.
-        :param dim_to_blur: The dimension along which to apply the Gaussian blur (0 for X, 1 for Y, 2 for Z).
-        :return: The blurred image tensor.
-        """
-        assert img.ndim - 1 > dim_to_blur, "dim_to_blur must be a valid spatial dimension of the input image."
-
-        # Adjustments for kernel based on image dimensions
-        spatial_dims = img.ndim - 1  # Number of spatial dimensions in the input image
-        kernel = _build_kernel(sigma)
-        ksize = kernel.shape[0]
-
-        # Dynamically set up padding, convolution operation, and kernel shape based on the number of spatial dimensions
-        conv_ops = {1: conv1d, 2: conv2d, 3: conv3d}
-        if force_use_fft is not None:
-            conv_op = conv_ops[spatial_dims] if not force_use_fft else fft_conv
-        else:
-            conv_op = conv_ops[spatial_dims]
-
-        # Adjust kernel and padding for the specified blur dimension and input dimensions
-        if spatial_dims == 1:
-            kernel = kernel[None, None, :]
-            padding = [ksize // 2, ksize // 2]
-        elif spatial_dims == 2:
-            if dim_to_blur == 0:
-                kernel = kernel[None, None, :, None]
-                padding = [0, 0, ksize // 2, ksize // 2]
-            else:  # dim_to_blur == 1
-                kernel = kernel[None, None, None, :]
-                padding = [ksize // 2, ksize // 2, 0, 0]
-        else:  # spatial_dims == 3
-            # Expand kernel and adjust padding based on the blur dimension
-            if dim_to_blur == 0:
-                kernel = kernel[None, None, :, None, None]
-                padding = [0, 0, 0, 0, ksize // 2, ksize // 2]
-            elif dim_to_blur == 1:
-                kernel = kernel[None, None, None, :, None]
-                padding = [0, 0, ksize // 2, ksize // 2, 0, 0]
-            else:  # dim_to_blur == 2
-                kernel = kernel[None, None, None, None, :]
-                padding = [ksize // 2, ksize // 2, 0, 0, 0, 0]
-
-        # Apply padding
-        img_padded = pad(img, padding, mode="reflect")
-
-        # Apply convolution
-        # remember that weights are [c_out, c_in, ...]
-        img_blurred = conv_op(img_padded[None], kernel.expand(img_padded.shape[0], *[-1] * (kernel.ndim - 1)), groups=img_padded.shape[0])[0]
-
-        return img_blurred
+            return blur_dimension(img, sigma, dim_to_blur, force_use_fft=self.benchmark_use_fft[shp][kernel_size])
 
 
-def _build_kernel(sigma: float) -> torch.Tensor:
-    kernel_size = _compute_kernel_size(sigma)
+def _build_kernel(sigma: float, truncate: float = 4) -> torch.Tensor:
+    kernel_size = _compute_kernel_size(sigma, truncate=truncate)
     ksize_half = (kernel_size - 1) * 0.5
 
     x = torch.linspace(-ksize_half, ksize_half, steps=kernel_size)
@@ -193,16 +196,31 @@ def _compute_kernel_size(sigma, truncate: float = 4):
 
 
 if __name__ == "__main__":
+    # this is the fastest for larger kernels but it doesn't fit well into the curent benchmark scheme
+
+    # tmp = np.fft.fftn(offsets[d].numpy())
+    # tmp = fourier_gaussian(tmp, sigmas)
+    # offsets[d] = torch.from_numpy(np.fft.ifftn(tmp).real)
+
     import os
     from batchgenerators.transforms.noise_transforms import GaussianBlurTransform as GBTBG
+    from batchviewer import view_batch
 
     os.environ['OMP_NUM_THREADS'] = '1'
     torch.set_num_threads(1)
 
-    shape = (64, 128, 192)
-    num_warmup_for_benchmark = 3
+    data = camera()
+    data_dict = {'image': torch.from_numpy(camera()[None]).float()}
+
+    gnt2 = GaussianBlurTransform(2, False, False, 1, benchmark=False)
+    out = gnt2(**data_dict)
+    # view_batch(out['image'], torch.from_numpy(camera()[None]).float())
+
+
+    shape = (128, 164, 64)
+    num_warmup_for_benchmark = 1
     num_repeats = 10
-    for sigma_range in (2, 3, 4, 5, 6, 7, 8):
+    for sigma_range in (0.1, 1, 10):
         print(shape, sigma_range)
         gnt2 = GaussianBlurTransform(sigma_range, False, False, 1, benchmark=False)
         times = []
