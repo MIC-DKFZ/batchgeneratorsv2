@@ -31,7 +31,8 @@ keywords = [
 ]
 dependencies = [
     "torch>=2.0.0",
-    "numpy"
+    "numpy",
+    "fft-conv-pytorch"
 ]
 
 #[project.urls]

@@ -22,7 +22,9 @@ class DownsampleSegForDSTransform(SegOnlyTransform):
                 results.append(segmentation)
             else:
                 new_shape = [round(i * j) for i, j in zip(segmentation.shape[1:], s)]
-                results.append(interpolate(segmentation[None], new_shape, mode='nearest-exact')[0])
+                dtype = segmentation.dtype
+                # interpolate is not defined for short etc
+                results.append(interpolate(segmentation[None].float(), new_shape, mode='nearest-exact')[0].to(dtype))
         return results
 
     def get_parameters(self, **data_dict) -> dict:

@@ -14,15 +14,17 @@ from batchgenerators_torch.transforms.base.basic_transform import BasicTransform
 from batchgenerators_torch.transforms.noise.gaussian_blur import blur_dimension
 from batchgenerators_torch.transforms.utils.cropping import crop_tensor, center_crop
 
+import pandas as pd
 
 class SpatialTransform(BasicTransform):
     def __init__(self, patch_size: Tuple[int, ...],
                  patch_center_dist_from_border: Union[int, List[int], Tuple[int, ...]],
                  random_crop: bool,
-                 p_elastic_deform, elastic_deform_scale: ScalarType, elastic_deform_magnitude: ScalarType,
-                 p_synchronize_def_scale_across_axes: float,
-                 p_rotation, rotation: ScalarType,
-                 p_scaling, scaling: ScalarType, p_synchronize_scaling_across_axes: float,
+                 p_elastic_deform: float = 0, elastic_deform_scale: ScalarType = (0, 0.2),
+                 elastic_deform_magnitude: ScalarType = (0, 0.2),
+                 p_synchronize_def_scale_across_axes: float = False,
+                 p_rotation: float = 0, rotation: ScalarType = (0, 2*np.pi),
+                 p_scaling: float = 0, scaling: ScalarType = (0.7, 1.3), p_synchronize_scaling_across_axes: float = False,
                  ):
         super().__init__()
         self.patch_size = patch_size
@@ -181,7 +183,8 @@ class SpatialTransform(BasicTransform):
             # we could have different labels in each channel, do channels separately
             result_seg = torch.zeros((segmentation.shape[0], *self.patch_size), dtype=segmentation.dtype)
             for c in range(segmentation.shape[0]):
-                labels = torch.where(torch.bincount(segmentation.ravel()) > 0)[0].to(segmentation.dtype)
+                labels = torch.from_numpy(np.sort(pd.unique(segmentation.numpy().ravel())))
+                #torch.where(torch.bincount(segmentation.ravel()) > 0)[0].to(segmentation.dtype)
                 # we can save 50% compute time if there is only 2 labels
                 tmp = torch.zeros((len(labels), *self.patch_size), dtype=torch.float16)
                 scale_factor = 1000
