@@ -34,15 +34,15 @@ dependencies = [
     "numpy"
 ]
 
-[project.urls]
-homepage = ""
-repository = ""
+#[project.urls]
+#homepage = ""
+#repository = ""
 
 
-[project.optional-dependencies]
-dev = [
-
-]
+#[project.optional-dependencies]
+#dev = [
+#
+#]
 
 [tool.codespell]
 skip = '.git,*.pdf,*.svg'
