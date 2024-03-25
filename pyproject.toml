@@ -2,7 +2,7 @@
 name = "batchgenerators_torch"
 version = "0.1"
 requires-python = ">=3.9"
-description = "Batchgenerators but with torch. Faster, better, specifically vuilt for nnU-Net"
+description = "Batchgenerators but with torch. Faster, better, specifically built for nnU-Net"
 readme = "readme.md"
 license = { file = "LICENSE" }
 authors = [
