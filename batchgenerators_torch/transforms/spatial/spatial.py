@@ -23,7 +23,7 @@ class SpatialTransform(BasicTransform):
                  p_synchronize_def_scale_across_axes: float,
                  p_rotation, rotation: ScalarType,
                  p_scaling, scaling: ScalarType, p_synchronize_scaling_across_axes: float,
-                 ):
+                 memefficient_seg_sampling: bool = False):
         super().__init__()
         self.patch_size = patch_size
         if not isinstance(patch_center_dist_from_border, (tuple, list)):
@@ -39,6 +39,7 @@ class SpatialTransform(BasicTransform):
         self.scaling = scaling  # larger numbers = smaller objects!
         self.p_synchronize_scaling_across_axes = p_synchronize_scaling_across_axes
         self.p_synchronize_def_scale_across_axes = p_synchronize_def_scale_across_axes
+        self.memefficient_seg_sampling = memefficient_seg_sampling
 
     def get_parameters(self, **data_dict) -> dict:
         dim = data_dict['image'].ndim - 1
@@ -180,20 +181,34 @@ class SpatialTransform(BasicTransform):
 
             # we could have different labels in each channel, do channels separately
             result_seg = torch.zeros((segmentation.shape[0], *self.patch_size), dtype=segmentation.dtype)
-            for c in range(segmentation.shape[0]):
-                labels = torch.where(torch.bincount(segmentation.ravel()) > 0)[0].to(segmentation.dtype)
-                # we can save 50% compute time if there is only 2 labels
-                tmp = torch.zeros((len(labels), *self.patch_size), dtype=torch.float16)
-                scale_factor = 1000
-                done_mask = torch.zeros(*self.patch_size, dtype=torch.bool)
-                for i, u in enumerate(labels):
-                    tmp[i] = grid_sample(((segmentation[c] == u).float() * scale_factor)[None, None], grid[None],
-                                         mode='bilinear', padding_mode="zeros", align_corners=False)[0][0]
-                    mask = tmp[i] > (0.7 * scale_factor)
-                    result_seg[c][mask] = u.item()
-                    done_mask = done_mask | mask
-                if not torch.all(done_mask):
-                    result_seg[c][~done_mask] = labels[tmp[:, ~done_mask].argmax(0)]
+            if self.memefficient_seg_sampling:
+                for c in range(segmentation.shape[0]):
+                    labels = torch.where(torch.bincount(segmentation.ravel()) > 0)[0].to(segmentation.dtype)
+                    # todo we can save 50% compute time if there is only 2 labels
+                    for i, u in enumerate(labels):
+                        result_seg[c][
+                            grid_sample(
+                                ((segmentation[c] == u).float())[None, None],
+                                grid[None],
+                                mode='bilinear',
+                                padding_mode="zeros",
+                                align_corners=False
+                            )[0][0] > 0.5] = u.item()
+            else:
+                for c in range(segmentation.shape[0]):
+                    labels = torch.where(torch.bincount(segmentation.ravel()) > 0)[0].to(segmentation.dtype)
+                    # todo we can save 50% compute time if there is only 2 labels
+                    tmp = torch.zeros((len(labels), *self.patch_size), dtype=torch.float16)
+                    scale_factor = 1000
+                    done_mask = torch.zeros(*self.patch_size, dtype=torch.bool)
+                    for i, u in enumerate(labels):
+                        tmp[i] = grid_sample(((segmentation[c] == u).float() * scale_factor)[None, None], grid[None],
+                                             mode='bilinear', padding_mode="zeros", align_corners=False)[0][0]
+                        mask = tmp[i] > (0.7 * scale_factor)
+                        result_seg[c][mask] = u.item()
+                        done_mask = done_mask | mask
+                    if not torch.all(done_mask):
+                        result_seg[c][~done_mask] = labels[tmp[:, ~done_mask].argmax(0)]
             return result_seg.contiguous()
 
     def _apply_to_regr_target(self, regression_target, **params) -> torch.Tensor:
