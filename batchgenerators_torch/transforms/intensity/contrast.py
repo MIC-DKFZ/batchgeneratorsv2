@@ -19,6 +19,8 @@ class BGContrast():
                 factor = np.random.uniform(max(self.contrast_range[0], 1), self.contrast_range[1])
         return factor
 
+    def __call__(self, *args, **kwargs):
+        return self.sample_contrast(*args, **kwargs)
 
 class ContrastTransform(ImageOnlyTransform):
     def __init__(self, contrast_range: ScalarType, preserve_range: bool, synchronize_channels: bool, p_per_channel: float = 1):

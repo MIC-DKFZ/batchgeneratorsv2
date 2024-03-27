@@ -57,22 +57,6 @@ class BasicTransform(abc.ABC):
         pass
 
 
-class RandomTransform(BasicTransform):
-    def __init__(self, transform: BasicTransform, apply_probability: float = 1):
-        super().__init__()
-        self.transform = transform
-        self.apply_probability = apply_probability
-
-    def get_parameters(self, **data_dict) -> dict:
-        return {"apply_transform": torch.rand(1).item() < self.apply_probability}
-
-    def apply(self, data_dict: dict, **params) -> dict:
-        if params['apply_to_sample']:
-            return self.transform(**data_dict)
-        else:
-            return data_dict
-
-
 class ImageOnlyTransform(BasicTransform):
     def apply(self, data_dict: dict, **params) -> dict:
         if data_dict.get('image') is not None:

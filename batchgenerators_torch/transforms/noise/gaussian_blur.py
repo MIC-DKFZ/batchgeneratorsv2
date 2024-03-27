@@ -72,8 +72,8 @@ def blur_dimension(img: torch.Tensor, sigma: float, dim_to_blur: int, force_use_
 class GaussianBlurTransform(ImageOnlyTransform):
     def __init__(self,
                  blur_sigma: ScalarType = (1, 5),
-                 synchronize_channels: bool = False,
-                 synchronize_axes: bool = False,
+                 synchronize_channels: bool = False,  # todo make this p_synchronize_channels
+                 synchronize_axes: bool = False,  # todo make this p_synchronize_axes
                  p_per_channel: float = 1,
                  benchmark: bool = False
                  ):
@@ -132,13 +132,13 @@ class GaussianBlurTransform(ImageOnlyTransform):
         else:
             # we have to go through all the channels, build the kernel for each channel etc
             idx = np.where(params['apply_to_channel'])[0]
-            for i in idx:
+            for j, i in enumerate(idx):
                 for d in range(dim):
                     # print(i, d, params['sigmas'][i][d])
                     if not self.benchmark:
-                        img[i:i+1] = blur_dimension(img[i:i+1], params['sigmas'][i][d], d)
+                        img[i:i+1] = blur_dimension(img[i:i+1], params['sigmas'][j][d], d)
                     else:
-                        img[i:i+1] = self._benchmark_wrapper(img[i:i+1], params['sigmas'][i][d], d)
+                        img[i:i+1] = self._benchmark_wrapper(img[i:i+1], params['sigmas'][j][d], d)
         return img
 
     def _benchmark_wrapper(self, img: torch.Tensor, sigma: float, dim_to_blur: int):
