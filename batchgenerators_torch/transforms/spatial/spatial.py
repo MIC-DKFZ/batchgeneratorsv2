@@ -325,15 +325,15 @@ if __name__ == '__main__':
     import SimpleITK as sitk
     # img = camera()
     # seg = None
-    img = sitk.GetArrayFromImage(sitk.ReadImage('/media/isensee/raw_data/nnUNet_raw/Dataset002_Heart/imagesTr/la_003_0000.nii.gz'))
-    seg = sitk.GetArrayFromImage(sitk.ReadImage('/media/isensee/raw_data/nnUNet_raw/Dataset002_Heart/labelsTr/la_003.nii.gz'))
+    img = sitk.GetArrayFromImage(sitk.ReadImage('/media/isensee/raw_data/nnUNet_raw/Dataset137_BraTS2021/imagesTr/BraTS2021_00000_0000.nii.gz'))
+    seg = sitk.GetArrayFromImage(sitk.ReadImage('/media/isensee/raw_data/nnUNet_raw/Dataset137_BraTS2021/labelsTr/BraTS2021_00000.nii.gz'))
 
     patch_size = (192, 192, 192)
     sp = SpatialTransform(
         patch_size=(192, 192, 192),
         patch_center_dist_from_border=[i / 2 for i in patch_size],
         random_crop=True,
-        p_elastic_deform=1,
+        p_elastic_deform=0,
         elastic_deform_magnitude=(0.1, 0.1),
         elastic_deform_scale=(0.1, 0.1),
         p_synchronize_def_scale_across_axes=0.5,
@@ -342,7 +342,8 @@ if __name__ == '__main__':
         p_scaling=1,
         scaling=(0.75, 1),
         p_synchronize_scaling_across_axes=0.5,
-        bg_style_seg_sampling=True
+        bg_style_seg_sampling=True,
+        mode_seg='bilinear'
     )
 
     data_dict = {'image': torch.from_numpy(deepcopy(img[None])).float()}
