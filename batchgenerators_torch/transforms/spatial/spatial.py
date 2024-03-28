@@ -1,20 +1,17 @@
 from copy import deepcopy
+from typing import Tuple, List, Union
 
 import numpy as np
-from typing import Tuple, List, Union, Optional
-
+import pandas as pd
 import torch
 from scipy.ndimage import fourier_gaussian
-from skimage.data import camera
 from torch import Tensor
 from torch.nn.functional import grid_sample
 
 from batchgenerators_torch.helpers.scalar_type import ScalarType, sample_scalar
 from batchgenerators_torch.transforms.base.basic_transform import BasicTransform
-from batchgenerators_torch.transforms.noise.gaussian_blur import blur_dimension
-from batchgenerators_torch.transforms.utils.cropping import crop_tensor, center_crop
+from batchgenerators_torch.transforms.utils.cropping import crop_tensor
 
-import pandas as pd
 
 class SpatialTransform(BasicTransform):
     def __init__(self, patch_size: Tuple[int, ...],
@@ -25,7 +22,8 @@ class SpatialTransform(BasicTransform):
                  p_synchronize_def_scale_across_axes: float = False,
                  p_rotation: float = 0, rotation: ScalarType = (0, 2*np.pi),
                  p_scaling: float = 0, scaling: ScalarType = (0.7, 1.3), p_synchronize_scaling_across_axes: float = False,
-                memefficient_seg_sampling: bool = False
+                 bg_style_seg_sampling: bool = True,
+                 mode_seg: str = 'bilinear'
                  ):
         super().__init__()
         self.patch_size = patch_size
@@ -42,7 +40,8 @@ class SpatialTransform(BasicTransform):
         self.scaling = scaling  # larger numbers = smaller objects!
         self.p_synchronize_scaling_across_axes = p_synchronize_scaling_across_axes
         self.p_synchronize_def_scale_across_axes = p_synchronize_def_scale_across_axes
-        self.memefficient_seg_sampling = memefficient_seg_sampling
+        self.bg_style_seg_sampling = bg_style_seg_sampling
+        self.mode_seg = mode_seg
 
     def get_parameters(self, **data_dict) -> dict:
         dim = data_dict['image'].ndim - 1
@@ -83,7 +82,6 @@ class SpatialTransform(BasicTransform):
                 self.elastic_deform_scale, image=data_dict['image'], dim=None, patch_size=self.patch_size)] * dim
             # sigmas must be in pixels, as this will be applied to the deformation field
             sigmas = [i * j for i, j in zip(deformation_scales, self.patch_size)]
-            print(sigmas)
             # the magnitude of the deformation field must adhere to the torch's value range for grid_sample, i.e. [-1. 1] and not pixel coordinates. Do not use sigmas here
             # we need to correct magnitude by grid_scale to account for the fact that the grid will be wrt to the image size but the magnitude should be wrt the patch size. oof.
             magnitude = [
@@ -91,6 +89,8 @@ class SpatialTransform(BasicTransform):
                               dim=i, deformation_scale=deformation_scales[i]) / grid_scale[i] for i in range(dim)]
             # doing it like this for better memory layout for blurring
             offsets = torch.normal(mean=0, std=1, size=(dim, *self.patch_size))
+
+            # all the additional time elastic deform takes is spent here
             for d in range(dim):
                 # fft torch, slower
                 # for i in range(offsets.ndim - 1):
@@ -103,7 +103,6 @@ class SpatialTransform(BasicTransform):
 
                 mx = torch.max(torch.abs(offsets[d]))
                 offsets[d] /= (mx / np.clip(magnitude[d], a_min=1e-8, a_max=np.inf))
-                print(d, offsets[d].max(), offsets[d].min())
             offsets = torch.permute(offsets, (1, 2, 3, 0))
         else:
             offsets = None
@@ -176,43 +175,63 @@ class SpatialTransform(BasicTransform):
             if params['affine'] is not None:
                 grid = torch.matmul(grid, torch.from_numpy(params['affine']).float())
 
-            # we center the grid around the center_location_in_pixels. We should center the mean of the grid, not the center position
+            # we center the grid around the center_location_in_pixels. We should center the mean of the grid, not the center coordinate
             mn = grid.mean(dim=list(range(segmentation.ndim - 1)))
             new_center = torch.Tensor(
                 [(j / (i / 2) - 1) for i, j in zip(segmentation.shape[1:], params['center_location_in_pixels'])])
             grid += - mn + new_center
 
-            # we could have different labels in each channel, do channels separately
-            result_seg = torch.zeros((segmentation.shape[0], *self.patch_size), dtype=segmentation.dtype)
-            if self.memefficient_seg_sampling:
-                for c in range(segmentation.shape[0]):
-                    labels = torch.from_numpy(np.sort(pd.unique(segmentation.numpy().ravel())))
-                    # todo we can save 50% compute time if there is only 2 labels
-                    for i, u in enumerate(labels):
-                        result_seg[c][
-                            grid_sample(
-                                ((segmentation[c] == u).float())[None, None],
+            if self.mode_seg == 'nearest':
+                result_seg = grid_sample(
+                                segmentation[None].float(),
                                 grid[None],
-                                mode='bilinear',
+                                mode=self.mode_seg,
                                 padding_mode="zeros",
                                 align_corners=False
-                            )[0][0] > 0.5] = u
+                            )[0].to(segmentation.dtype)
             else:
-                for c in range(segmentation.shape[0]):
-                    labels = torch.from_numpy(np.sort(pd.unique(segmentation.numpy().ravel())))
-                    #torch.where(torch.bincount(segmentation.ravel()) > 0)[0].to(segmentation.dtype)
-                    # todo we can save 50% compute time if there is only 2 labels
-                    tmp = torch.zeros((len(labels), *self.patch_size), dtype=torch.float16)
-                    scale_factor = 1000
-                    done_mask = torch.zeros(*self.patch_size, dtype=torch.bool)
-                    for i, u in enumerate(labels):
-                        tmp[i] = grid_sample(((segmentation[c] == u).float() * scale_factor)[None, None], grid[None],
-                                             mode='bilinear', padding_mode="zeros", align_corners=False)[0][0]
-                        mask = tmp[i] > (0.7 * scale_factor)
-                        result_seg[c][mask] = u
-                        done_mask = done_mask | mask
-                    if not torch.all(done_mask):
-                        result_seg[c][~done_mask] = labels[tmp[:, ~done_mask].argmax(0)]
+                result_seg = torch.zeros((segmentation.shape[0], *self.patch_size), dtype=segmentation.dtype)
+                if self.bg_style_seg_sampling:
+                    for c in range(segmentation.shape[0]):
+                        labels = torch.from_numpy(np.sort(pd.unique(segmentation[c].numpy().ravel())))
+                        # if we only have 2 labels then we can save compute time
+                        if len(labels) == 2:
+                            out = grid_sample(
+                                    ((segmentation[c] == labels[1]).float())[None, None],
+                                    grid[None],
+                                    mode=self.mode_seg,
+                                    padding_mode="zeros",
+                                    align_corners=False
+                                )[0][0] >= 0.5
+                            result_seg[c][out] = labels[1]
+                            result_seg[c][~out] = labels[0]
+                        else:
+                            for i, u in enumerate(labels):
+                                result_seg[c][
+                                    grid_sample(
+                                        ((segmentation[c] == u).float())[None, None],
+                                        grid[None],
+                                        mode=self.mode_seg,
+                                        padding_mode="zeros",
+                                        align_corners=False
+                                    )[0][0] >= 0.5] = u
+                else:
+                    for c in range(segmentation.shape[0]):
+                        labels = torch.from_numpy(np.sort(pd.unique(segmentation[c].numpy().ravel())))
+                        #torch.where(torch.bincount(segmentation.ravel()) > 0)[0].to(segmentation.dtype)
+                        tmp = torch.zeros((len(labels), *self.patch_size), dtype=torch.float16)
+                        scale_factor = 1000
+                        done_mask = torch.zeros(*self.patch_size, dtype=torch.bool)
+                        for i, u in enumerate(labels):
+                            tmp[i] = grid_sample(((segmentation[c] == u).float() * scale_factor)[None, None], grid[None],
+                                                 mode=self.mode_seg, padding_mode="zeros", align_corners=False)[0][0]
+                            mask = tmp[i] > (0.7 * scale_factor)
+                            result_seg[c][mask] = u
+                            done_mask = done_mask | mask
+                        if not torch.all(done_mask):
+                            result_seg[c][~done_mask] = labels[tmp[:, ~done_mask].argmax(0)]
+                        del tmp
+            del grid
             return result_seg.contiguous()
 
     def _apply_to_regr_target(self, regression_target, **params) -> torch.Tensor:
@@ -291,9 +310,9 @@ def _create_identity_grid(size: List[int]) -> Tensor:
 if __name__ == '__main__':
     torch.set_num_threads(1)
 
-    # shape = (128, 128, 128)
-    # patch_size = (128, 128, 128)
-    # labels = 2
+    shape = (128, 128, 128)
+    patch_size = (128, 128, 128)
+    labels = 2
 
 
     # seg = torch.rand([i // 32 for i in shape]) * labels
@@ -306,39 +325,40 @@ if __name__ == '__main__':
     import SimpleITK as sitk
     # img = camera()
     # seg = None
-    img = sitk.GetArrayFromImage(sitk.ReadImage('/media/isensee/raw_data/nnUNet_raw/Dataset003_Liver/imagesTr/liver_53_0000.nii.gz'))
-    seg = sitk.GetArrayFromImage(sitk.ReadImage('/media/isensee/raw_data/nnUNet_raw/Dataset003_Liver/labelsTr/liver_53.nii.gz'))
+    img = sitk.GetArrayFromImage(sitk.ReadImage('/media/isensee/raw_data/nnUNet_raw/Dataset002_Heart/imagesTr/la_003_0000.nii.gz'))
+    seg = sitk.GetArrayFromImage(sitk.ReadImage('/media/isensee/raw_data/nnUNet_raw/Dataset002_Heart/labelsTr/la_003.nii.gz'))
 
     patch_size = (192, 192, 192)
     sp = SpatialTransform(
         patch_size=(192, 192, 192),
         patch_center_dist_from_border=[i / 2 for i in patch_size],
         random_crop=True,
-        p_elastic_deform=0,
+        p_elastic_deform=1,
         elastic_deform_magnitude=(0.1, 0.1),
         elastic_deform_scale=(0.1, 0.1),
         p_synchronize_def_scale_across_axes=0.5,
-        p_rotation=0,
+        p_rotation=1,
         rotation=(-30 / 360 * np.pi, 30 / 360 * np.pi),
-        p_scaling=0,
+        p_scaling=1,
         scaling=(0.75, 1),
-        p_synchronize_scaling_across_axes=0.5
+        p_synchronize_scaling_across_axes=0.5,
+        bg_style_seg_sampling=True
     )
 
     data_dict = {'image': torch.from_numpy(deepcopy(img[None])).float()}
     if seg is not None:
         data_dict['segmentation'] = torch.from_numpy(deepcopy(seg[None]))
-    out = sp(**data_dict)
-    from batchviewer import view_batch
+    # out = sp(**data_dict)
+    #
+    # view_batch(out['image'], out['segmentation'])
 
-    view_batch(out['image'], out['segmentation'])
-
-    # from time import time
-    # times = []
-    # for _ in range(10):
-    #     data_dict = {'image': torch.ones((2, *shape))}
-    #     data_dict['image'][tuple([slice(data_dict['image'].shape[0])] + [slice(i // 4, i // 4 * 3) for i in shape])] = 200
-    #     st = time()
-    #     out = sp(**data_dict)
-    #     times.append(time() - st)
-    # print(np.median(times))
+    from time import time
+    times = []
+    for _ in range(10):
+        data_dict = {'image': torch.from_numpy(deepcopy(img[None])).float()}
+        if seg is not None:
+            data_dict['segmentation'] = torch.from_numpy(deepcopy(seg[None]))
+        st = time()
+        out = sp(**data_dict)
+        times.append(time() - st)
+    print(np.median(times))
