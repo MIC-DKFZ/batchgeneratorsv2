@@ -50,3 +50,6 @@ dependencies = [
 skip = '.git,*.pdf,*.svg'
 #
 # ignore-words-list = ''
+
+[tool.setuptools]
+packages = ["batchgeneratorsv2"]
