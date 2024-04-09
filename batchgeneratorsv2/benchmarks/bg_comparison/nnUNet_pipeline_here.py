@@ -3,21 +3,21 @@ from time import time
 import numpy as np
 import torch
 
-from batchgenerators_torch.transforms.intensity.brightness import MultiplicativeBrightnessTransform
-from batchgenerators_torch.transforms.intensity.contrast import BGContrast, ContrastTransform
-from batchgenerators_torch.transforms.intensity.gamma import GammaTransform
-from batchgenerators_torch.transforms.intensity.gaussian_noise import GaussianNoiseTransform
-from batchgenerators_torch.transforms.noise.gaussian_blur import GaussianBlurTransform
-from batchgenerators_torch.transforms.spatial.low_resolution import SimulateLowResolutionTransform
-from batchgenerators_torch.transforms.spatial.mirroring import MirrorTransform
-from batchgenerators_torch.transforms.spatial.spatial import SpatialTransform
-from batchgenerators_torch.transforms.utils.compose import ComposeTransforms
-from batchgenerators_torch.transforms.utils.deep_supervision_downsampling import DownsampleSegForDSTransform
-from batchgenerators_torch.transforms.utils.nnunet_masking import MaskImageTransform
-from batchgenerators_torch.transforms.utils.pseudo2d import Convert2DTo3DTransform, Convert3DTo2DTransform
-from batchgenerators_torch.transforms.utils.random import RandomTransform
-from batchgenerators_torch.transforms.utils.remove_label import RemoveLabelTansform
-from batchgenerators_torch.transforms.utils.seg_to_regions import ConvertSegmentationToRegionsTransform
+from batchgeneratorsv2.transforms.intensity.brightness import MultiplicativeBrightnessTransform
+from batchgeneratorsv2.transforms.intensity.contrast import BGContrast, ContrastTransform
+from batchgeneratorsv2.transforms.intensity.gamma import GammaTransform
+from batchgeneratorsv2.transforms.intensity.gaussian_noise import GaussianNoiseTransform
+from batchgeneratorsv2.transforms.noise.gaussian_blur import GaussianBlurTransform
+from batchgeneratorsv2.transforms.spatial.low_resolution import SimulateLowResolutionTransform
+from batchgeneratorsv2.transforms.spatial.mirroring import MirrorTransform
+from batchgeneratorsv2.transforms.spatial.spatial import SpatialTransform
+from batchgeneratorsv2.transforms.utils.compose import ComposeTransforms
+from batchgeneratorsv2.transforms.utils.deep_supervision_downsampling import DownsampleSegForDSTransform
+from batchgeneratorsv2.transforms.utils.nnunet_masking import MaskImageTransform
+from batchgeneratorsv2.transforms.utils.pseudo2d import Convert2DTo3DTransform, Convert3DTo2DTransform
+from batchgeneratorsv2.transforms.utils.random import RandomTransform
+from batchgeneratorsv2.transforms.utils.remove_label import RemoveLabelTansform
+from batchgeneratorsv2.transforms.utils.seg_to_regions import ConvertSegmentationToRegionsTransform
 
 if __name__ == '__main__':
     regions = ((1, 2, 3), (2, 3), (3, ))

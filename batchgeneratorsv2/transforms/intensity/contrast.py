@@ -1,7 +1,7 @@
 import torch
 
-from batchgenerators_torch.helpers.scalar_type import ScalarType, sample_scalar
-from batchgenerators_torch.transforms.base.basic_transform import ImageOnlyTransform
+from batchgeneratorsv2.helpers.scalar_type import ScalarType, sample_scalar
+from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
 import numpy as np
 
 

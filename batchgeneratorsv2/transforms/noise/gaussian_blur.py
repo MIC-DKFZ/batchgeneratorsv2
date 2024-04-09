@@ -3,12 +3,11 @@ from copy import deepcopy
 import numpy as np
 from time import time
 import torch
-from scipy.ndimage import fourier_gaussian
 from skimage.data import camera
 from torch.nn.functional import pad, conv3d, conv1d, conv2d
 
-from batchgenerators_torch.helpers.scalar_type import ScalarType, sample_scalar
-from batchgenerators_torch.transforms.base.basic_transform import ImageOnlyTransform
+from batchgeneratorsv2.helpers.scalar_type import ScalarType, sample_scalar
+from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
 from fft_conv_pytorch import fft_conv
 
 

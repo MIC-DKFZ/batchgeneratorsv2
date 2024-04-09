@@ -2,7 +2,7 @@ from typing import Tuple
 
 import torch
 
-from batchgenerators_torch.transforms.base.basic_transform import BasicTransform
+from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 
 
 class MirrorTransform(BasicTransform):

@@ -2,7 +2,7 @@ from typing import Union, Tuple, List
 
 import torch
 
-from batchgenerators_torch.transforms.base.basic_transform import SegOnlyTransform
+from batchgeneratorsv2.transforms.base.basic_transform import SegOnlyTransform
 
 
 class RemoveLabelTansform(SegOnlyTransform):

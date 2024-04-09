@@ -1,6 +1,6 @@
 from typing import List
 
-from batchgenerators_torch.transforms.base.basic_transform import BasicTransform
+from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 
 
 class MaskImageTransform(BasicTransform):

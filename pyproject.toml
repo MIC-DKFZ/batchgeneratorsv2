@@ -1,8 +1,8 @@
 [project]
-name = "batchgenerators_torch"
+name = "batchgeneratorsv2"
 version = "0.1"
 requires-python = ">=3.9"
-description = "Batchgenerators but with torch. Faster, better, specifically built for nnU-Net"
+description = "Batchgenerators but better"
 readme = "readme.md"
 license = { file = "LICENSE" }
 authors = [
@@ -32,7 +32,8 @@ keywords = [
 dependencies = [
     "torch>=2.0.0",
     "numpy",
-    "fft-conv-pytorch"
+    "fft-conv-pytorch",
+    "batchgenerators>=0.25"
 ]
 
 #[project.urls]
