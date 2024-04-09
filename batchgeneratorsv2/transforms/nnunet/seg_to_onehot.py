@@ -22,7 +22,7 @@ class MoveSegAsOneHotToDataTransform(BasicTransform):
 
     def apply(self, data_dict, **params):
         seg = data_dict['segmentation'][self.source_channel_idx]
-        seg_onehot = torch.zeros((len(self.all_labels), *seg.shape[1:]), dtype=data_dict['image'].dtype)
+        seg_onehot = torch.zeros((len(self.all_labels), *seg.shape), dtype=data_dict['image'].dtype)
         for i, l in enumerate(self.all_labels):
             seg_onehot[i][seg == l] = 1
         data_dict['image'] = torch.cat((data_dict['image'], seg_onehot))
