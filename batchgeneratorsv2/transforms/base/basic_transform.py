@@ -50,9 +50,8 @@ class BasicTransform(abc.ABC):
     def _apply_to_bbox(self, bbox, **params):
         pass
 
-    @abc.abstractmethod
     def get_parameters(self, **data_dict) -> dict:
-        pass
+        return {}
 
 
 class ImageOnlyTransform(BasicTransform):

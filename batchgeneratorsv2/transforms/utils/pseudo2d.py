@@ -6,9 +6,6 @@ from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 
 
 class Convert3DTo2DTransform(BasicTransform):
-    def get_parameters(self, **data_dict) -> dict:
-        return {}
-
     def apply(self, data_dict, **params):
         if 'image' in data_dict.keys():
             data_dict['nchannels_img'] = deepcopy(data_dict['image']).shape[0]

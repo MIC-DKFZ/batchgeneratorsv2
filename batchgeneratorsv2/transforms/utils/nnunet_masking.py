@@ -20,6 +20,3 @@ class MaskImageTransform(BasicTransform):
             data_dict['image'][c][mask] = self.set_outside_to
         return data_dict
 
-    def get_parameters(self, **data_dict) -> dict:
-        return {}
-

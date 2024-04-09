@@ -27,9 +27,6 @@ class DownsampleSegForDSTransform(SegOnlyTransform):
                 results.append(interpolate(segmentation[None].float(), new_shape, mode='nearest-exact')[0].to(dtype))
         return results
 
-    def get_parameters(self, **data_dict) -> dict:
-        return {}
-
 
 if __name__ == '__main__':
     from time import time

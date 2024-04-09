@@ -8,9 +8,6 @@ class ComposeTransforms(BasicTransform):
         super().__init__()
         self.transforms = transforms
 
-    def get_parameters(self, **data_dict) -> dict:
-        return {}
-
     def apply(self, data_dict, **params):
         for t in self.transforms:
             data_dict = t(**data_dict)

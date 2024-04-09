@@ -14,9 +14,6 @@ class RemoveLabelTansform(SegOnlyTransform):
         self.set_to = set_to
         super().__init__()
 
-    def get_parameters(self, **data_dict) -> dict:
-        return {}
-
     def _apply_to_segmentation(self, segmentation: torch.Tensor, **params) -> torch.Tensor:
         if self.segmentation_channels is None:
             channels = list(range(segmentation.shape[0]))
