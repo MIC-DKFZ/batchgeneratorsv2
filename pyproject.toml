@@ -1,6 +1,6 @@
 [project]
 name = "batchgeneratorsv2"
-version = "0.1"
+version = "0.1.1"
 requires-python = ">=3.9"
 description = "Batchgenerators but better"
 readme = "readme.md"
@@ -51,5 +51,6 @@ skip = '.git,*.pdf,*.svg'
 #
 # ignore-words-list = ''
 
-[tool.setuptools]
-packages = ["batchgeneratorsv2"]
+[tool.setuptools.packages.find]
+where = [""]
+include = ["batchgeneratorsv2.*"]
