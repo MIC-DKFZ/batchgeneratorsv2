@@ -14,9 +14,6 @@ class ConvertSegmentationToRegionsTransform(SegOnlyTransform):
     def _apply_to_segmentation(self, segmentation: torch.Tensor, **params) -> torch.Tensor:
         num_regions = len(self.regions)
         region_output = torch.zeros((num_regions, *segmentation.shape[1:]), dtype=torch.bool, device=segmentation.device)
-        for region_id, region_source_labels in enumerate(self.regions):
-            if not isinstance(region_source_labels, (list, tuple)):
-                region_source_labels = (region_source_labels, )
-            for label_value in region_source_labels:
-                region_output[region_id] |= (segmentation[self.channel_in_seg] == label_value)
+        for region_id, region_labels in enumerate(self.regions):
+            region_output[:, region_id] |= np.isin(seg[:, self.seg_channel], region_labels)
         return region_output.to(segmentation.dtype)
