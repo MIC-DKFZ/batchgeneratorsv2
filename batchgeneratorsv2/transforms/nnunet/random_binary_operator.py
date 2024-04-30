@@ -5,7 +5,7 @@ import numpy as np
 import torch
 from fft_conv_pytorch import fft_conv
 
-from batchgeneratorsv2.helpers.scalar_type import ScalarType, sample_scalar
+from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
 from skimage.morphology import ball, disk
 from skimage.morphology.binary import binary_erosion, binary_dilation, binary_closing, binary_opening
@@ -59,7 +59,7 @@ class ApplyRandomBinaryOperatorTransform(ImageOnlyTransform):
     def __init__(self,
                  channel_idx: Union[int, List[int], Tuple[int, ...]],
                  any_of_these: Tuple[Callable, ...] = (binary_dilation_torch, binary_erosion_torch, binary_closing_torch, binary_opening_torch),
-                 strel_size: ScalarType = (1, 10),
+                 strel_size: RandomScalar = (1, 10),
                  p_per_label: float = 1):
         """
         We use fft conv. Slower for small kernels but boi does it perform on larger kernels

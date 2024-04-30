@@ -2,10 +2,10 @@ from typing import Union, Tuple, Callable
 import numpy as np
 
 
-ScalarType = Union[int, float, Tuple[float, float], Callable[..., Union[int, float]]]
+RandomScalar = Union[int, float, Tuple[float, float], Callable[..., Union[int, float]]]
 
 
-def sample_scalar(scalar_type: ScalarType, *args, **kwargs):
+def sample_scalar(scalar_type: RandomScalar, *args, **kwargs):
     if isinstance(scalar_type, (int, float)):
         return scalar_type
     elif isinstance(scalar_type, (list, tuple)):

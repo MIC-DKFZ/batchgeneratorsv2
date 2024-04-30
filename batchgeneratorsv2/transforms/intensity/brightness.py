@@ -1,11 +1,11 @@
 import torch
 
-from batchgeneratorsv2.helpers.scalar_type import ScalarType, sample_scalar
+from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
 
 
 class MultiplicativeBrightnessTransform(ImageOnlyTransform):
-    def __init__(self, multiplier_range: ScalarType, synchronize_channels: bool, p_per_channel: float = 1):
+    def __init__(self, multiplier_range: RandomScalar, synchronize_channels: bool, p_per_channel: float = 1):
         super().__init__()
         self.multiplier_range = multiplier_range
         self.synchronize_channels = synchronize_channels

@@ -1,6 +1,6 @@
 import torch
 
-from batchgeneratorsv2.helpers.scalar_type import ScalarType, sample_scalar
+from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
 import numpy as np
 
@@ -23,7 +23,7 @@ class BGContrast():
         return self.sample_contrast(*args, **kwargs)
 
 class ContrastTransform(ImageOnlyTransform):
-    def __init__(self, contrast_range: ScalarType, preserve_range: bool, synchronize_channels: bool, p_per_channel: float = 1):
+    def __init__(self, contrast_range: RandomScalar, preserve_range: bool, synchronize_channels: bool, p_per_channel: float = 1):
         super().__init__()
         self.contrast_range = contrast_range
         self.preserve_range = preserve_range

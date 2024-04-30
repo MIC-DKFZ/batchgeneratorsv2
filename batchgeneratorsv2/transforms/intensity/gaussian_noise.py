@@ -1,14 +1,14 @@
 import os
 from typing import Tuple
 
-from batchgeneratorsv2.helpers.scalar_type import ScalarType, sample_scalar
+from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
 import torch
 
 
 class GaussianNoiseTransform(ImageOnlyTransform):
     def __init__(self,
-                 noise_variance: ScalarType = (0, 0.1),
+                 noise_variance: RandomScalar = (0, 0.1),
                  p_per_channel: float = 1.,
                  synchronize_channels: bool = False):
         self.noise_variance = noise_variance

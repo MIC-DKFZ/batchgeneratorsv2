@@ -2,12 +2,12 @@ from typing import Callable, Union
 
 import torch
 
-from batchgeneratorsv2.helpers.scalar_type import ScalarType, sample_scalar
+from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
 
 
 class GammaTransform(ImageOnlyTransform):
-    def __init__(self, gamma: ScalarType, p_invert_image: float, synchronize_channels: bool, p_per_channel: float,
+    def __init__(self, gamma: RandomScalar, p_invert_image: float, synchronize_channels: bool, p_per_channel: float,
                  p_retain_stats: float):
         super().__init__()
         self.gamma = gamma

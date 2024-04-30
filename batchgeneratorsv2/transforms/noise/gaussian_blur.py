@@ -6,7 +6,7 @@ import torch
 from skimage.data import camera
 from torch.nn.functional import pad, conv3d, conv1d, conv2d
 
-from batchgeneratorsv2.helpers.scalar_type import ScalarType, sample_scalar
+from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
 from fft_conv_pytorch import fft_conv
 
@@ -70,7 +70,7 @@ def blur_dimension(img: torch.Tensor, sigma: float, dim_to_blur: int, force_use_
 
 class GaussianBlurTransform(ImageOnlyTransform):
     def __init__(self,
-                 blur_sigma: ScalarType = (1, 5),
+                 blur_sigma: RandomScalar = (1, 5),
                  synchronize_channels: bool = False,  # todo make this p_synchronize_channels
                  synchronize_axes: bool = False,  # todo make this p_synchronize_axes
                  p_per_channel: float = 1,

@@ -8,7 +8,7 @@ from scipy.ndimage import fourier_gaussian
 from torch import Tensor
 from torch.nn.functional import grid_sample
 
-from batchgeneratorsv2.helpers.scalar_type import ScalarType, sample_scalar
+from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
 from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 from batchgeneratorsv2.transforms.utils.cropping import crop_tensor
 
@@ -17,11 +17,11 @@ class SpatialTransform(BasicTransform):
     def __init__(self, patch_size: Tuple[int, ...],
                  patch_center_dist_from_border: Union[int, List[int], Tuple[int, ...]],
                  random_crop: bool,
-                 p_elastic_deform: float = 0, elastic_deform_scale: ScalarType = (0, 0.2),
-                 elastic_deform_magnitude: ScalarType = (0, 0.2),
+                 p_elastic_deform: float = 0, elastic_deform_scale: RandomScalar = (0, 0.2),
+                 elastic_deform_magnitude: RandomScalar = (0, 0.2),
                  p_synchronize_def_scale_across_axes: float = False,
-                 p_rotation: float = 0, rotation: ScalarType = (0, 2*np.pi),
-                 p_scaling: float = 0, scaling: ScalarType = (0.7, 1.3), p_synchronize_scaling_across_axes: float = False,
+                 p_rotation: float = 0, rotation: RandomScalar = (0, 2 * np.pi),
+                 p_scaling: float = 0, scaling: RandomScalar = (0.7, 1.3), p_synchronize_scaling_across_axes: float = False,
                  bg_style_seg_sampling: bool = True,
                  mode_seg: str = 'bilinear'
                  ):

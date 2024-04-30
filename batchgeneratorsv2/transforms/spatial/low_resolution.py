@@ -2,13 +2,13 @@ from typing import Tuple
 
 import torch
 
-from batchgeneratorsv2.helpers.scalar_type import ScalarType, sample_scalar
+from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
 from torch.nn.functional import interpolate
 
 
 class SimulateLowResolutionTransform(ImageOnlyTransform):
-    def __init__(self, scale: ScalarType, synchronize_channels: bool, synchronize_axes: bool,
+    def __init__(self, scale: RandomScalar, synchronize_channels: bool, synchronize_axes: bool,
                  ignore_axes: Tuple[int, ...],
                  allowed_channels: Tuple[int, ...] = None, p_per_channel: float = 1):
         super().__init__()
