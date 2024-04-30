@@ -87,4 +87,4 @@ if __name__ == '__main__':
             compute_times[i].append(time() - st)
 
     for t, ct in zip(tr_transforms, compute_times):
-        print(t.__class__.__name__, np.percentile(ct, 20))
+        print(t.__class__.__name__, np.mean(ct))

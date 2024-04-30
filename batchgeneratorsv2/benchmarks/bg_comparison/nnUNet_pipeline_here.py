@@ -135,4 +135,4 @@ if __name__ == '__main__':
                 compute_times[i].append(time() - st)
 
     for t, ct in zip(transforms, compute_times):
-        print(t.__class__.__name__ if not isinstance(t, RandomTransform) else t.transform.__class__.__name__, np.percentile(ct, 20))
+        print(t.__class__.__name__ if not isinstance(t, RandomTransform) else t.transform.__class__.__name__, np.mean(ct))
