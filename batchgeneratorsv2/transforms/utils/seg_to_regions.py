@@ -18,5 +18,7 @@ class ConvertSegmentationToRegionsTransform(SegOnlyTransform):
                 region_output[region_id] = segmentation[self.channel_in_seg] == region_labels
             else:
                 region_output[region_id] = torch.isin(segmentation[self.channel_in_seg], region_labels)
-        return region_output.to(segmentation.dtype, copy=False)
+        # we return bool here and leave it to the loss function to cast it to whatever it needs. Transferring bool to
+        # device followed by cast on device should be faster than having fp32 here and transferring that
+        return region_output
 
