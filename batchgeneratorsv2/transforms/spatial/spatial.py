@@ -1,6 +1,7 @@
 from copy import deepcopy
 from typing import Tuple, List, Union
 
+import math
 import numpy as np
 import pandas as pd
 import torch
@@ -130,7 +131,7 @@ class SpatialTransform(BasicTransform):
             # No spatial transformation is being done. Round grid_center and crop without having to interpolate.
             # This saves compute.
             # cropping requires the center to be given as integer coordinates
-            img = crop_tensor(img, [np.floor(i) for i in params['center_location_in_pixels']], self.patch_size, pad_mode='constant',
+            img = crop_tensor(img, [math.floor(i) for i in params['center_location_in_pixels']], self.patch_size, pad_mode='constant',
                               pad_kwargs={'value': 0})
             return img
         else:
@@ -159,7 +160,7 @@ class SpatialTransform(BasicTransform):
             # No spatial transformation is being done. Round grid_center and crop without having to interpolate.
             # This saves compute.
             # cropping requires the center to be given as integer coordinates
-            segmentation = crop_tensor(segmentation, [np.floor(i) for i in params['center_location_in_pixels']], self.patch_size,
+            segmentation = crop_tensor(segmentation, [math.floor(i) for i in params['center_location_in_pixels']], self.patch_size,
                                        pad_mode='constant', pad_kwargs={'value': 0})
             return segmentation
         else:
