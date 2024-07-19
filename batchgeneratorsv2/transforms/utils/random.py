@@ -17,3 +17,7 @@ class RandomTransform(BasicTransform):
             return self.transform(**data_dict)
         else:
             return data_dict
+    
+    def __repr__(self):
+        ret_str = f"{type(self).__name__}(p={self.apply_probability}, transform={self.transform})"
+        return ret_str
