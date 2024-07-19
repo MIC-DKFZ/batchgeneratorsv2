@@ -61,9 +61,10 @@ class SpatialTransform(BasicTransform):
         else:
             angles = [0] * dim
         if do_scale:
-            scales = [sample_scalar(self.scaling, image=data_dict['image'], dim=i) for i in
-                      range(dim)] if np.random.uniform() < self.p_synchronize_scaling_across_axes else [sample_scalar(
-                self.scaling, image=data_dict['image'], dim=None)] * dim
+            if np.random.uniform() <= self.p_synchronize_scaling_across_axes:
+                scales = [sample_scalar(self.scaling, image=data_dict['image'], dim=None)] * dim
+            else:
+                scales = [sample_scalar(self.scaling, image=data_dict['image'], dim=i) for i in range(dim)]
         else:
             scales = [1] * dim
         # affine matrix
@@ -81,11 +82,16 @@ class SpatialTransform(BasicTransform):
         # we use the method from augment_spatial_2 in batchgenerators
         if do_deform:
             grid_scale = [i / j for i, j in zip(data_dict['image'].shape[1:], self.patch_size)]
-            deformation_scales = [
-                sample_scalar(self.elastic_deform_scale, image=data_dict['image'], dim=i, patch_size=self.patch_size)
-                for i in
-                range(dim)] if np.random.uniform() < self.p_synchronize_def_scale_across_axes else [sample_scalar(
-                self.elastic_deform_scale, image=data_dict['image'], dim=None, patch_size=self.patch_size)] * dim
+            if np.random.uniform() <= self.p_synchronize_def_scale_across_axes:
+                deformation_scales = [
+                    sample_scalar(self.elastic_deform_scale, image=data_dict['image'], dim=None, patch_size=self.patch_size)
+                    ] * dim
+            else:
+                deformation_scales = [
+                    sample_scalar(self.elastic_deform_scale, image=data_dict['image'], dim=i, patch_size=self.patch_size)
+                    for i in range(dim)
+                    ]
+
             # sigmas must be in pixels, as this will be applied to the deformation field
             sigmas = [i * j for i, j in zip(deformation_scales, self.patch_size)]
             # the magnitude of the deformation field must adhere to the torch's value range for grid_sample, i.e. [-1. 1] and not pixel coordinates. Do not use sigmas here
