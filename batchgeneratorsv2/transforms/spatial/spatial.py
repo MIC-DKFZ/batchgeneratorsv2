@@ -162,7 +162,7 @@ class SpatialTransform(BasicTransform):
             mn = grid.mean(dim=list(range(img.ndim - 1)))
             new_center = torch.Tensor(
                 [(j / (i / 2) - 1) for i, j in zip(img.shape[1:], params['center_location_in_pixels'])])
-            grid += - mn + new_center
+            grid += - mn + torch.flip(new_center, dims=[0])
             return grid_sample(img[None], grid[None], mode='bilinear', padding_mode="zeros", align_corners=False)[0]
 
     def _apply_to_segmentation(self, segmentation: torch.Tensor, **params) -> torch.Tensor:
@@ -191,7 +191,7 @@ class SpatialTransform(BasicTransform):
             mn = grid.mean(dim=list(range(segmentation.ndim - 1)))
             new_center = torch.Tensor(
                 [(j / (i / 2) - 1) for i, j in zip(segmentation.shape[1:], params['center_location_in_pixels'])])
-            grid += - mn + new_center
+            grid += - mn + torch.flip(new_center, dims=[0])
 
             if self.mode_seg == 'nearest':
                 result_seg = grid_sample(
