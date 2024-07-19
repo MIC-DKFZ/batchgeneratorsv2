@@ -15,14 +15,19 @@ from batchgeneratorsv2.transforms.utils.cropping import crop_tensor
 
 
 class SpatialTransform(BasicTransform):
-    def __init__(self, patch_size: Tuple[int, ...],
+    def __init__(self,
+                 patch_size: Tuple[int, ...],
                  patch_center_dist_from_border: Union[int, List[int], Tuple[int, ...]],
                  random_crop: bool,
-                 p_elastic_deform: float = 0, elastic_deform_scale: RandomScalar = (0, 0.2),
+                 p_elastic_deform: float = 0,
+                 elastic_deform_scale: RandomScalar = (0, 0.2),
                  elastic_deform_magnitude: RandomScalar = (0, 0.2),
-                 p_synchronize_def_scale_across_axes: float = False,
-                 p_rotation: float = 0, rotation: RandomScalar = (0, 2 * np.pi),
-                 p_scaling: float = 0, scaling: RandomScalar = (0.7, 1.3), p_synchronize_scaling_across_axes: float = False,
+                 p_synchronize_def_scale_across_axes: float = 0,
+                 p_rotation: float = 0,
+                 rotation: RandomScalar = (0, 2 * np.pi),
+                 p_scaling: float = 0,
+                 scaling: RandomScalar = (0.7, 1.3),
+                 p_synchronize_scaling_across_axes: float = 0,
                  bg_style_seg_sampling: bool = True,
                  mode_seg: str = 'bilinear'
                  ):
@@ -79,7 +84,7 @@ class SpatialTransform(BasicTransform):
             deformation_scales = [
                 sample_scalar(self.elastic_deform_scale, image=data_dict['image'], dim=i, patch_size=self.patch_size)
                 for i in
-                range(dim)] if np.random.uniform() < self.p_synchronize_scaling_across_axes else [sample_scalar(
+                range(dim)] if np.random.uniform() < self.p_synchronize_def_scale_across_axes else [sample_scalar(
                 self.elastic_deform_scale, image=data_dict['image'], dim=None, patch_size=self.patch_size)] * dim
             # sigmas must be in pixels, as this will be applied to the deformation field
             sigmas = [i * j for i, j in zip(deformation_scales, self.patch_size)]
