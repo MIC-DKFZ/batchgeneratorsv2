@@ -391,42 +391,46 @@ if __name__ == '__main__':
     # print(np.median(times))
 
 
-    def constant_scaling(image, dim, patch_size):
-        return 0.1
+    #################
+    # with this part we can qualitatively test that the correct axes are ebing augmented. Just set one of the probs to 1 and off you go
+    #################
 
-    def constant_magnitude(image, dim, patch_size, deformation_scale):
-        return 0.25 if dim == 2 else 0
-
-    def rot(image, dim):
-        return 45/360 * 2 * np.pi if dim == 1 else 0
-
-    sp = SpatialTransform(
-        patch_size=(64, 60, 68),
-        patch_center_dist_from_border=0,
-        random_crop=False,
-        p_elastic_deform=0,
-        elastic_deform_scale=0,
-        elastic_deform_magnitude=0,
-        p_synchronize_def_scale_across_axes=0,
-        p_rotation=1,
-        rotation=rot,
-        p_scaling=0,
-        scaling=constant_scaling,
-        p_synchronize_scaling_across_axes=0,
-        bg_style_seg_sampling=False,
-        mode_seg='bilinear'
-    )
-
-    patch = torch.zeros((1, 64, 60, 68))
-    patch[:, :, 10, 30] = 1
-    patch[:, 50, :, 30] = 1
-    patch[:, 40, 20, :] = 1
-    SimpleITK.WriteImage(SimpleITK.GetImageFromArray(patch[0].numpy()), 'orig.nii.gz')
-
-    params = sp.get_parameters(image=patch)
-    transformed = sp._apply_to_image(patch, **params)
-
-    SimpleITK.WriteImage(SimpleITK.GetImageFromArray(transformed[0].numpy()), 'transformed.nii.gz')
+    # def constant_scaling(image, dim, patch_size):
+    #     return 0.1
+    #
+    # def constant_magnitude(image, dim, patch_size, deformation_scale):
+    #     return 0.25 if dim == 2 else 0
+    #
+    # def rot(image, dim):
+    #     return 45/360 * 2 * np.pi if dim == 1 else 0
+    #
+    # sp = SpatialTransform(
+    #     patch_size=(64, 60, 68),
+    #     patch_center_dist_from_border=0,
+    #     random_crop=False,
+    #     p_elastic_deform=0,
+    #     elastic_deform_scale=0,
+    #     elastic_deform_magnitude=0,
+    #     p_synchronize_def_scale_across_axes=0,
+    #     p_rotation=1,
+    #     rotation=rot,
+    #     p_scaling=0,
+    #     scaling=constant_scaling,
+    #     p_synchronize_scaling_across_axes=0,
+    #     bg_style_seg_sampling=False,
+    #     mode_seg='bilinear'
+    # )
+    #
+    # patch = torch.zeros((1, 64, 60, 68))
+    # patch[:, :, 10, 30] = 1
+    # patch[:, 50, :, 30] = 1
+    # patch[:, 40, 20, :] = 1
+    # SimpleITK.WriteImage(SimpleITK.GetImageFromArray(patch[0].numpy()), 'orig.nii.gz')
+    #
+    # params = sp.get_parameters(image=patch)
+    # transformed = sp._apply_to_image(patch, **params)
+    #
+    # SimpleITK.WriteImage(SimpleITK.GetImageFromArray(transformed[0].numpy()), 'transformed.nii.gz')
 
     # p = torch.zeros((1, 1, 8, 16, 32))
     # p[:, :, 2:6, 10:16, 10:24] = 1
@@ -437,7 +441,51 @@ if __name__ == '__main__':
     # SimpleITK.WriteImage(SimpleITK.GetImageFromArray(p[0, 0].numpy()), 'orig.nii.gz')
     # SimpleITK.WriteImage(SimpleITK.GetImageFromArray(out[0, 0].numpy()), 'transformed.nii.gz')
 
+    #################
+    # with this part I verify that the crop through spatialtransforms grid sample yields the same result as crop_tensor
+    #################
 
+    sp = SpatialTransform(
+        patch_size=(48, 52, 54),
+        patch_center_dist_from_border=0,
+        random_crop=True,
+        p_elastic_deform=0,
+        p_rotation=1,
+        p_scaling=0,
+        rotation=0
+    )
+    sp2 = SpatialTransform(
+        patch_size=(48, 52, 54),
+        patch_center_dist_from_border=0,
+        random_crop=True,
+        p_elastic_deform=0,
+        p_rotation=0,
+        p_scaling=0,
+    )
+
+    patch = torch.zeros((1, 64, 60, 68))
+    patch[:, :, 10, 30] = 1
+    patch[:, 50, :, 30] = 1
+    patch[:, 40, 20, :] = 1
+    SimpleITK.WriteImage(SimpleITK.GetImageFromArray(patch[0].numpy()), 'orig.nii.gz')
+
+    center_coords = [30, 28, 44]
+    params = sp.get_parameters(image=patch)
+    params['center_location_in_pixels'] = center_coords
+    params2 = sp2.get_parameters(image=patch)
+    params2['center_location_in_pixels'] = center_coords
+    transformed = sp._apply_to_image(patch, **params)
+    transformed2 = sp._apply_to_image(patch, **params)
+
+    SimpleITK.WriteImage(SimpleITK.GetImageFromArray(transformed[0].numpy()), 'transformed.nii.gz')
+    SimpleITK.WriteImage(SimpleITK.GetImageFromArray(transformed2[0].numpy()), 'transformed2.nii.gz')
+
+
+
+####################
+    # This is exploraroty code to check how to retrieve coordinates. I used it to verify that grid_sample does in fact
+    # use coordinates in reversed dimension order (zyx and not xyz)
+    ####################
     # # create a dummy input which has a unique shape in each exis
     # p = torch.zeros((1, 1, 8, 16, 32))
     # # set one pixel to 1
