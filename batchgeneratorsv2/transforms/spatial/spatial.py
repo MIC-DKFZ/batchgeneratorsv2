@@ -2,6 +2,8 @@ from copy import deepcopy
 from typing import Tuple, List, Union
 
 import math
+
+import SimpleITK
 import numpy as np
 import pandas as pd
 import torch
@@ -147,6 +149,7 @@ class SpatialTransform(BasicTransform):
             return img
         else:
             grid = _create_identity_grid(self.patch_size)
+            grid = torch.flip(grid, (len(self.patch_size),))
 
             # the grid must be scaled. The grid is [-1, 1] in image coordinates, but we want it to represent the smaller patch
             grid_scale = torch.Tensor([i / j for i, j in zip(img.shape[1:], self.patch_size)])
@@ -159,11 +162,15 @@ class SpatialTransform(BasicTransform):
                 grid = torch.matmul(grid, torch.from_numpy(params['affine']).float())
 
             # we center the grid around the center_location_in_pixels. We should center the mean of the grid, not the center position
-            mn = grid.mean(dim=list(range(img.ndim - 1)))
+            # only do this if we elastic deform
+            if params['elastic_offsets'] is not None:
+                mn = grid.mean(dim=list(range(img.ndim - 1)))
+            else:
+                mn = 0
             new_center = torch.Tensor(
                 [(j / (i / 2) - 1) for i, j in zip(img.shape[1:], params['center_location_in_pixels'])])
-            grid += - mn + torch.flip(new_center, dims=[0])
-            return grid_sample(img[None], grid[None], mode='bilinear', padding_mode="zeros", align_corners=False)[0]
+            grid += - mn + new_center
+            return grid_sample(img[None], torch.flip(grid, (len(self.patch_size),))[None], mode='bilinear', padding_mode="zeros", align_corners=False)[0]
 
     def _apply_to_segmentation(self, segmentation: torch.Tensor, **params) -> torch.Tensor:
         segmentation = segmentation.contiguous()
@@ -176,6 +183,7 @@ class SpatialTransform(BasicTransform):
             return segmentation
         else:
             grid = _create_identity_grid(self.patch_size)
+            grid = torch.flip(grid, (len(self.patch_size),))
 
             # the grid must be scaled. The grid is [-1, 1] in image coordinates, but we want it to represent the smaller patch
             grid_scale = torch.Tensor([i / j for i, j in zip(segmentation.shape[1:], self.patch_size)])
@@ -188,10 +196,15 @@ class SpatialTransform(BasicTransform):
                 grid = torch.matmul(grid, torch.from_numpy(params['affine']).float())
 
             # we center the grid around the center_location_in_pixels. We should center the mean of the grid, not the center coordinate
-            mn = grid.mean(dim=list(range(segmentation.ndim - 1)))
+            if params['elastic_offsets'] is not None:
+                mn = grid.mean(dim=list(range(segmentation.ndim - 1)))
+            else:
+                mn = 0
             new_center = torch.Tensor(
                 [(j / (i / 2) - 1) for i, j in zip(segmentation.shape[1:], params['center_location_in_pixels'])])
-            grid += - mn + torch.flip(new_center, dims=[0])
+            grid += - mn + new_center
+
+            grid = torch.flip(grid, (len(self.patch_size),))[None]
 
             if self.mode_seg == 'nearest':
                 result_seg = grid_sample(
@@ -320,58 +333,120 @@ def _create_identity_grid(size: List[int]) -> Tensor:
 
 
 if __name__ == '__main__':
-    torch.set_num_threads(1)
+    # torch.set_num_threads(1)
+    #
+    # shape = (128, 128, 128)
+    # patch_size = (128, 128, 128)
+    # labels = 2
+    #
+    #
+    # # seg = torch.rand([i // 32 for i in shape]) * labels
+    # # seg_up = torch.round(torch.nn.functional.interpolate(seg[None, None], size=shape, mode='trilinear')[0],
+    # #                      decimals=0).to(torch.int16)
+    # # img = torch.ones((1, *shape))
+    # # img[tuple([slice(img.shape[0])] + [slice(i // 4, i // 4 * 2) for i in shape])] = 200
+    #
+    #
+    # import SimpleITK as sitk
+    # # img = camera()
+    # # seg = None
+    # img = sitk.GetArrayFromImage(sitk.ReadImage('/media/isensee/raw_data/nnUNet_raw/Dataset137_BraTS2021/imagesTr/BraTS2021_00000_0000.nii.gz'))
+    # seg = sitk.GetArrayFromImage(sitk.ReadImage('/media/isensee/raw_data/nnUNet_raw/Dataset137_BraTS2021/labelsTr/BraTS2021_00000.nii.gz'))
+    #
+    # patch_size = (192, 192, 192)
+    # sp = SpatialTransform(
+    #     patch_size=(192, 192, 192),
+    #     patch_center_dist_from_border=[i / 2 for i in patch_size],
+    #     random_crop=True,
+    #     p_elastic_deform=0,
+    #     elastic_deform_magnitude=(0.1, 0.1),
+    #     elastic_deform_scale=(0.1, 0.1),
+    #     p_synchronize_def_scale_across_axes=0.5,
+    #     p_rotation=1,
+    #     rotation=(-30 / 360 * np.pi, 30 / 360 * np.pi),
+    #     p_scaling=1,
+    #     scaling=(0.75, 1),
+    #     p_synchronize_scaling_across_axes=0.5,
+    #     bg_style_seg_sampling=True,
+    #     mode_seg='bilinear'
+    # )
+    #
+    # data_dict = {'image': torch.from_numpy(deepcopy(img[None])).float()}
+    # if seg is not None:
+    #     data_dict['segmentation'] = torch.from_numpy(deepcopy(seg[None]))
+    # # out = sp(**data_dict)
+    # #
+    # # view_batch(out['image'], out['segmentation'])
+    #
+    # from time import time
+    # times = []
+    # for _ in range(10):
+    #     data_dict = {'image': torch.from_numpy(deepcopy(img[None])).float()}
+    #     if seg is not None:
+    #         data_dict['segmentation'] = torch.from_numpy(deepcopy(seg[None]))
+    #     st = time()
+    #     out = sp(**data_dict)
+    #     times.append(time() - st)
+    # print(np.median(times))
 
-    shape = (128, 128, 128)
-    patch_size = (128, 128, 128)
-    labels = 2
 
+    def constant_scaling(image, dim):
+        return 1 if dim == 0 else 1
 
-    # seg = torch.rand([i // 32 for i in shape]) * labels
-    # seg_up = torch.round(torch.nn.functional.interpolate(seg[None, None], size=shape, mode='trilinear')[0],
-    #                      decimals=0).to(torch.int16)
-    # img = torch.ones((1, *shape))
-    # img[tuple([slice(img.shape[0])] + [slice(i // 4, i // 4 * 2) for i in shape])] = 200
-
-
-    import SimpleITK as sitk
-    # img = camera()
-    # seg = None
-    img = sitk.GetArrayFromImage(sitk.ReadImage('/media/isensee/raw_data/nnUNet_raw/Dataset137_BraTS2021/imagesTr/BraTS2021_00000_0000.nii.gz'))
-    seg = sitk.GetArrayFromImage(sitk.ReadImage('/media/isensee/raw_data/nnUNet_raw/Dataset137_BraTS2021/labelsTr/BraTS2021_00000.nii.gz'))
-
-    patch_size = (192, 192, 192)
     sp = SpatialTransform(
-        patch_size=(192, 192, 192),
-        patch_center_dist_from_border=[i / 2 for i in patch_size],
-        random_crop=True,
+        patch_size=(9, 17, 33),
+        patch_center_dist_from_border=0,
+        random_crop=False,
         p_elastic_deform=0,
-        elastic_deform_magnitude=(0.1, 0.1),
-        elastic_deform_scale=(0.1, 0.1),
-        p_synchronize_def_scale_across_axes=0.5,
-        p_rotation=1,
-        rotation=(-30 / 360 * np.pi, 30 / 360 * np.pi),
+        elastic_deform_scale=0,
+        elastic_deform_magnitude=0,
+        p_synchronize_def_scale_across_axes=0,
+        p_rotation=0,
+        rotation=0,
         p_scaling=1,
-        scaling=(0.75, 1),
-        p_synchronize_scaling_across_axes=0.5,
-        bg_style_seg_sampling=True,
+        scaling=constant_scaling,
+        p_synchronize_scaling_across_axes=0,
+        bg_style_seg_sampling=False,
         mode_seg='bilinear'
     )
 
-    data_dict = {'image': torch.from_numpy(deepcopy(img[None])).float()}
-    if seg is not None:
-        data_dict['segmentation'] = torch.from_numpy(deepcopy(seg[None]))
-    # out = sp(**data_dict)
-    #
-    # view_batch(out['image'], out['segmentation'])
+    patch = torch.zeros((1, 9, 17, 33))
+    patch[:, 2:6, 10:16, 10:24] = 1
+    SimpleITK.WriteImage(SimpleITK.GetImageFromArray(patch[0].numpy()), 'orig.nii.gz')
 
-    from time import time
-    times = []
-    for _ in range(10):
-        data_dict = {'image': torch.from_numpy(deepcopy(img[None])).float()}
-        if seg is not None:
-            data_dict['segmentation'] = torch.from_numpy(deepcopy(seg[None]))
-        st = time()
-        out = sp(**data_dict)
-        times.append(time() - st)
-    print(np.median(times))
+    params = sp.get_parameters(image=patch)
+    transformed = sp._apply_to_image(patch, **params)
+
+    SimpleITK.WriteImage(SimpleITK.GetImageFromArray(transformed[0].numpy()), 'transformed.nii.gz')
+
+    # p = torch.zeros((1, 1, 8, 16, 32))
+    # p[:, :, 2:6, 10:16, 10:24] = 1
+    # grid = _create_identity_grid(p.shape[2:])
+    # grid[:, :, :, 0] *= 0.5
+    # out = grid_sample(p, grid[None], mode='bilinear', padding_mode="zeros", align_corners=False)
+    # torch.all(out == p)
+    # SimpleITK.WriteImage(SimpleITK.GetImageFromArray(p[0, 0].numpy()), 'orig.nii.gz')
+    # SimpleITK.WriteImage(SimpleITK.GetImageFromArray(out[0, 0].numpy()), 'transformed.nii.gz')
+
+
+    # # create a dummy input which has a unique shape in each exis
+    # p = torch.zeros((1, 1, 8, 16, 32))
+    # # set one pixel to 1
+    # p[:, :, 4, 0, 31] = 1
+    # # now create an identity grid. I have verified that this grid yields the same image as the input when used in grid_sample. So the grid is correct
+    # grid = _create_identity_grid((8, 16, 32)).contiguous() # grid is shape torch.Size([8, 16, 32, 3])
+    # out = grid_sample(p, grid[None], mode='bilinear', padding_mode="zeros", align_corners=False)
+    # assert torch.all(out == p)  # this passes
+    # # reduce the grid to the location we are interested in. That are the coordinates where we placed the 1. The 4:5 etc is only so that we keep the number of dimensions
+    # grid = grid[4:5, 0:1, 31:32]
+    # # What coordinate would we expect? Note that grid is [-1, 1]
+    # # For the first dimension, coordinate 4 out of shape 8 is approximately in the middle, so about 0
+    # # For the second dimension, coordinate 0 out of shape 16 is very low, so we expect -1 ish (remember there is aligned corners and shit)
+    # # For the third dimension, coordinate 31 out of shape 32 is very high, so we expect 1 ish (remember there is aligned corners and shit)
+    # # So we expect [0, -1, 1]
+    # # What do we get?
+    # print(grid)
+    # # > tensor([[[[ 0.9688, -0.9375,  0.1250]]]])
+    # # not what we expect
+    # out = grid_sample(p, grid[None], mode='bilinear', padding_mode="zeros", align_corners=False)
+    # assert out.item() == 1
