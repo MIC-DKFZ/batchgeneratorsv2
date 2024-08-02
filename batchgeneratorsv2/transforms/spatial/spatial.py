@@ -33,6 +33,9 @@ class SpatialTransform(BasicTransform):
                  bg_style_seg_sampling: bool = True,
                  mode_seg: str = 'bilinear'
                  ):
+        """
+        magnitude must be given in pixels!
+        """
         super().__init__()
         self.patch_size = patch_size
         if not isinstance(patch_center_dist_from_border, (tuple, list)):
@@ -52,7 +55,6 @@ class SpatialTransform(BasicTransform):
         self.mode_seg = mode_seg
 
     def get_parameters(self, **data_dict) -> dict:
-        # note that we revert the axis order here because grid_sample uses dimensions in reverse order!
         dim = data_dict['image'].ndim - 1
 
         do_rotation = np.random.uniform() < self.p_rotation
@@ -85,7 +87,6 @@ class SpatialTransform(BasicTransform):
         # elastic deformation. We need to create the displacement field here
         # we use the method from augment_spatial_2 in batchgenerators
         if do_deform:
-            grid_scale = [i / j for i, j in zip(data_dict['image'].shape[1:], self.patch_size)]
             if np.random.uniform() <= self.p_synchronize_def_scale_across_axes:
                 deformation_scales = [
                     sample_scalar(self.elastic_deform_scale, image=data_dict['image'], dim=None, patch_size=self.patch_size)
@@ -98,11 +99,11 @@ class SpatialTransform(BasicTransform):
 
             # sigmas must be in pixels, as this will be applied to the deformation field
             sigmas = [i * j for i, j in zip(deformation_scales, self.patch_size)]
-            # the magnitude of the deformation field must adhere to the torch's value range for grid_sample, i.e. [-1. 1] and not pixel coordinates. Do not use sigmas here
-            # we need to correct magnitude by grid_scale to account for the fact that the grid will be wrt to the image size but the magnitude should be wrt the patch size. oof.
+
             magnitude = [
                 sample_scalar(self.elastic_deform_magnitude, image=data_dict['image'], patch_size=self.patch_size,
-                              dim=i, deformation_scale=deformation_scales[i]) / grid_scale[i] for i in range(0, 3)]
+                              dim=i, deformation_scale=deformation_scales[i])
+                for i in range(0, 3)]
             # doing it like this for better memory layout for blurring
             offsets = torch.normal(mean=0, std=1, size=(dim, *self.patch_size))
 
@@ -122,7 +123,7 @@ class SpatialTransform(BasicTransform):
             offsets = torch.permute(offsets, (1, 2, 3, 0))
         else:
             offsets = None
-        # grid center must be in [-1, 1] as required by grid_sample
+
         shape = data_dict['image'].shape[1:]
         if not self.random_crop:
             center_location_in_pixels = [i / 2 for i in shape]
@@ -146,15 +147,11 @@ class SpatialTransform(BasicTransform):
             # No spatial transformation is being done. Round grid_center and crop without having to interpolate.
             # This saves compute.
             # cropping requires the center to be given as integer coordinates
-            img = crop_tensor(img, [math.floor(i) for i in params['center_location_in_pixels']][::-1], self.patch_size, pad_mode='constant',
+            img = crop_tensor(img, [math.floor(i) for i in params['center_location_in_pixels']], self.patch_size, pad_mode='constant',
                               pad_kwargs={'value': 0})
             return img
         else:
-            grid = _create_identity_grid(self.patch_size)
-
-            # the grid must be scaled. The grid is [-1, 1] in image coordinates, but we want it to represent the smaller patch
-            grid_scale = torch.Tensor([i / j for i, j in zip(img.shape[1:], self.patch_size)][::-1])
-            grid /= grid_scale
+            grid = _create_centered_identity_grid2(self.patch_size)
 
             # we deform first, then rotate
             if params['elastic_offsets'] is not None:
@@ -168,10 +165,11 @@ class SpatialTransform(BasicTransform):
                 mn = grid.mean(dim=list(range(img.ndim - 1)))
             else:
                 mn = 0
-            new_center = torch.Tensor(
-                [(j / (i / 2) - 1) for i, j in zip(img.shape[1:][::-1], params['center_location_in_pixels'])])
-            grid += - mn + new_center
-            return grid_sample(img[None], grid[None], mode='bilinear', padding_mode="zeros", align_corners=False)[0]
+
+            new_center = torch.Tensor([c - s / 2 for c, s in zip(params['center_location_in_pixels'], img.shape[1:])])
+            grid += (new_center - mn)
+            return grid_sample(img[None], _convert_my_grid_to_grid_sample_grid(grid, img.shape[1:])[None],
+                               mode='bilinear', padding_mode="zeros", align_corners=False)[0]
 
     def _apply_to_segmentation(self, segmentation: torch.Tensor, **params) -> torch.Tensor:
         segmentation = segmentation.contiguous()
@@ -180,17 +178,13 @@ class SpatialTransform(BasicTransform):
             # This saves compute.
             # cropping requires the center to be given as integer coordinates
             segmentation = crop_tensor(segmentation,
-                                       [math.floor(i) for i in params['center_location_in_pixels']][::-1],
+                                       [math.floor(i) for i in params['center_location_in_pixels']],
                                        self.patch_size,
                                        pad_mode='constant',
                                        pad_kwargs={'value': 0})
             return segmentation
         else:
-            grid = _create_identity_grid(self.patch_size)
-
-            # the grid must be scaled. The grid is [-1, 1] in image coordinates, but we want it to represent the smaller patch
-            grid_scale = torch.Tensor([i / j for i, j in zip(segmentation.shape[1:], self.patch_size)][::-1])
-            grid /= grid_scale
+            grid = _create_centered_identity_grid2(self.patch_size)
 
             # we deform first, then rotate
             if params['elastic_offsets'] is not None:
@@ -203,9 +197,11 @@ class SpatialTransform(BasicTransform):
                 mn = grid.mean(dim=list(range(segmentation.ndim - 1)))
             else:
                 mn = 0
-            new_center = torch.Tensor(
-                [(j / (i / 2) - 1) for i, j in zip(segmentation.shape[1:][::-1], params['center_location_in_pixels'])])
-            grid += - mn + new_center
+
+            new_center = torch.Tensor([c - s / 2 for c, s in zip(params['center_location_in_pixels'], segmentation.shape[1:])])
+
+            grid += (new_center - mn)
+            grid = _convert_my_grid_to_grid_sample_grid(grid, segmentation.shape[1:])
 
             if self.mode_seg == 'nearest':
                 result_seg = grid_sample(
@@ -305,14 +301,37 @@ def create_affine_matrix_2d(rotation_angle, scaling_factors):
     return RS
 
 
-def _create_identity_grid(size: List[int]) -> Tensor:
-    space = [torch.linspace((-s + 1) / s, (s - 1) / s, s) for s in size[::-1]]
+# def _create_identity_grid(size: List[int]) -> Tensor:
+#     space = [torch.linspace((-s + 1) / s, (s - 1) / s, s) for s in size[::-1]]
+#     grid = torch.meshgrid(space, indexing="ij")
+#     grid = torch.stack(grid, -1)
+#     spatial_dims = list(range(len(size)))
+#     grid = grid.permute((*spatial_dims[::-1], len(size)))
+#     return grid
+
+
+def _create_centered_identity_grid2(size: Union[Tuple[int, ...], List[int]]) -> torch.Tensor:
+    space = [torch.linspace((1 - s) / 2, (s - 1) / 2, s) for s in size]
     grid = torch.meshgrid(space, indexing="ij")
     grid = torch.stack(grid, -1)
-    spatial_dims = list(range(len(size)))
-    grid = grid.permute((*spatial_dims[::-1], len(size)))
     return grid
 
+
+def _convert_my_grid_to_grid_sample_grid(my_grid: torch.Tensor, original_shape: Union[Tuple[int, ...], List[int]]):
+    # rescale
+    for d in range(len(original_shape)):
+        s = original_shape[d]
+        my_grid[..., d] /= (s / 2)
+    my_grid = torch.flip(my_grid, (len(my_grid.shape) - 1, ))
+    # my_grid = my_grid.flip((len(my_grid.shape) - 1,))
+    return my_grid
+
+
+# size = (4, 5, 6)
+# grid_old = _create_identity_grid(size)
+# grid_new = _create_centered_identity_grid2(size)
+# grid_new_converted = _convert_my_grid_to_grid_sample_grid(grid_new, size)
+# torch.all(torch.isclose(grid_new_converted, grid_old))
 
 # An alternative way of generating the displacement fieldQ
 # def displacement_field(data: torch.Tensor):
@@ -399,30 +418,13 @@ if __name__ == '__main__':
         return 0.1
 
     def eldef_magnitude(image, dim, patch_size, deformation_scale):
-        return 0.25 if dim == 2 else 0
+        return 10 if dim == 2 else 0
 
     def rot(image, dim):
-        return 45/360 * 2 * np.pi if dim == 1 else 0
+        return 45/360 * 2 * np.pi if dim == 0 else 0
 
     def scaling(image, dim):
         return 0.5 if dim == 0 else 1
-
-    sp = SpatialTransform(
-        patch_size=(64, 60, 68),
-        patch_center_dist_from_border=0,
-        random_crop=False,
-        p_elastic_deform=0,
-        p_rotation=0,
-        p_scaling=1,
-        elastic_deform_scale=eldef_scale,
-        elastic_deform_magnitude=eldef_magnitude,
-        p_synchronize_def_scale_across_axes=0,
-        rotation=rot,
-        scaling=scaling,
-        p_synchronize_scaling_across_axes=0,
-        bg_style_seg_sampling=False,
-        mode_seg='bilinear'
-    )
 
     # lines
     patch = torch.zeros((1, 64, 60, 68))
@@ -434,7 +436,27 @@ if __name__ == '__main__':
     patch_block = torch.zeros((1, 64, 60, 68))
     patch_block[:, 22:42, 20:40, 24:44] = 1
 
-    use = patch_block
+    patch_line = torch.zeros((1, 64, 60, 128))
+    patch_line[:, 22:24, 30:32, 10:-10] = 1
+    use = patch_line
+
+    sp = SpatialTransform(
+        patch_size=patch.shape[1:],
+        patch_center_dist_from_border=0,
+        random_crop=False,
+        p_elastic_deform=0,
+        p_rotation=1,
+        p_scaling=0,
+        elastic_deform_scale=eldef_scale,
+        elastic_deform_magnitude=eldef_magnitude,
+        p_synchronize_def_scale_across_axes=0,
+        rotation=rot,
+        scaling=scaling,
+        p_synchronize_scaling_across_axes=0,
+        bg_style_seg_sampling=False,
+        mode_seg='bilinear'
+    )
+
 
     SimpleITK.WriteImage(SimpleITK.GetImageFromArray(use[0].numpy()), 'orig.nii.gz')
 
@@ -480,20 +502,20 @@ if __name__ == '__main__':
     # patch[:, 40, 20, :] = 1
     # SimpleITK.WriteImage(SimpleITK.GetImageFromArray(patch[0].numpy()), 'orig.nii.gz')
     #
-    # center_coords = [30, 28, 44]
+    # center_coords = [50, 10, 16]
     # params = sp.get_parameters(image=patch)
     # params['center_location_in_pixels'] = center_coords
     # params2 = sp2.get_parameters(image=patch)
     # params2['center_location_in_pixels'] = center_coords
     # transformed = sp._apply_to_image(patch, **params)
-    # transformed2 = sp._apply_to_image(patch, **params)
+    # transformed2 = sp._apply_to_image(patch, **params2)
     #
     # SimpleITK.WriteImage(SimpleITK.GetImageFromArray(transformed[0].numpy()), 'transformed.nii.gz')
     # SimpleITK.WriteImage(SimpleITK.GetImageFromArray(transformed2[0].numpy()), 'transformed2.nii.gz')
 
 
 
-####################
+    ####################
     # This is exploraroty code to check how to retrieve coordinates. I used it to verify that grid_sample does in fact
     # use coordinates in reversed dimension order (zyx and not xyz)
     ####################
