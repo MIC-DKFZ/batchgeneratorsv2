@@ -60,14 +60,14 @@ class SpatialTransform(BasicTransform):
         do_deform = np.random.uniform() < self.p_elastic_deform
 
         if do_rotation:
-            angles = [sample_scalar(self.rotation, image=data_dict['image'], dim=i) for i in range(dim - 1, -1, -1)]
+            angles = [sample_scalar(self.rotation, image=data_dict['image'], dim=i) for i in range(0, 3)]
         else:
             angles = [0] * dim
         if do_scale:
             if np.random.uniform() <= self.p_synchronize_scaling_across_axes:
                 scales = [sample_scalar(self.scaling, image=data_dict['image'], dim=None)] * dim
             else:
-                scales = [sample_scalar(self.scaling, image=data_dict['image'], dim=i) for i in range(dim - 1, -1, -1)]
+                scales = [sample_scalar(self.scaling, image=data_dict['image'], dim=i) for i in range(0, 3)]
         else:
             scales = [1] * dim
 
@@ -85,7 +85,7 @@ class SpatialTransform(BasicTransform):
         # elastic deformation. We need to create the displacement field here
         # we use the method from augment_spatial_2 in batchgenerators
         if do_deform:
-            grid_scale = [i / j for i, j in zip(data_dict['image'].shape[1:], self.patch_size)][::-1]
+            grid_scale = [i / j for i, j in zip(data_dict['image'].shape[1:], self.patch_size)]
             if np.random.uniform() <= self.p_synchronize_def_scale_across_axes:
                 deformation_scales = [
                     sample_scalar(self.elastic_deform_scale, image=data_dict['image'], dim=None, patch_size=self.patch_size)
@@ -93,16 +93,16 @@ class SpatialTransform(BasicTransform):
             else:
                 deformation_scales = [
                     sample_scalar(self.elastic_deform_scale, image=data_dict['image'], dim=i, patch_size=self.patch_size)
-                    for i in range(dim - 1, -1, -1)
+                    for i in range(0, 3)
                     ]
 
             # sigmas must be in pixels, as this will be applied to the deformation field
-            sigmas = [i * j for i, j in zip(deformation_scales, self.patch_size)][::-1]
+            sigmas = [i * j for i, j in zip(deformation_scales, self.patch_size)]
             # the magnitude of the deformation field must adhere to the torch's value range for grid_sample, i.e. [-1. 1] and not pixel coordinates. Do not use sigmas here
             # we need to correct magnitude by grid_scale to account for the fact that the grid will be wrt to the image size but the magnitude should be wrt the patch size. oof.
             magnitude = [
                 sample_scalar(self.elastic_deform_magnitude, image=data_dict['image'], patch_size=self.patch_size,
-                              dim=i, deformation_scale=deformation_scales[i]) / grid_scale[i] for i in range(dim - 1, -1, -1)]
+                              dim=i, deformation_scale=deformation_scales[i]) / grid_scale[i] for i in range(0, 3)]
             # doing it like this for better memory layout for blurring
             offsets = torch.normal(mean=0, std=1, size=(dim, *self.patch_size))
 
@@ -125,10 +125,10 @@ class SpatialTransform(BasicTransform):
         # grid center must be in [-1, 1] as required by grid_sample
         shape = data_dict['image'].shape[1:]
         if not self.random_crop:
-            center_location_in_pixels = [i / 2 for i in shape][::-1]
+            center_location_in_pixels = [i / 2 for i in shape]
         else:
             center_location_in_pixels = []
-            for d in range(dim - 1, -1, -1):
+            for d in range(0, 3):
                 mn = self.patch_center_dist_from_border[d]
                 mx = shape[d] - self.patch_center_dist_from_border[d]
                 if mx < mn:
