@@ -8,9 +8,13 @@ from torch.nn.functional import interpolate
 
 
 class SimulateLowResolutionTransform(ImageOnlyTransform):
-    def __init__(self, scale: RandomScalar, synchronize_channels: bool, synchronize_axes: bool,
+    def __init__(self,
+                 scale: RandomScalar,
+                 synchronize_channels: bool,
+                 synchronize_axes: bool,
                  ignore_axes: Tuple[int, ...],
-                 allowed_channels: Tuple[int, ...] = None, p_per_channel: float = 1):
+                 allowed_channels: Tuple[int, ...] = None,
+                 p_per_channel: float = 1):
         super().__init__()
         self.scale = scale
         self.synchronize_channels = synchronize_channels
