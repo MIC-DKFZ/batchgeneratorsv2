@@ -44,7 +44,7 @@ class SpatialTransform(BasicTransform):
         self.random_crop = random_crop
         self.p_elastic_deform = p_elastic_deform
         self.elastic_deform_scale = elastic_deform_scale  # sigma for blurring offsets, in % of patch size. Larger values mean coarser deformation
-        self.elastic_deform_magnitude = elastic_deform_magnitude  # determines the maximum displacement, measured in % of patch size
+        self.elastic_deform_magnitude = elastic_deform_magnitude  # determines the maximum displacement, measured in pixels!!
         self.p_rotation = p_rotation
         self.rotation = rotation
         self.p_scaling = p_scaling
@@ -94,7 +94,7 @@ class SpatialTransform(BasicTransform):
             else:
                 deformation_scales = [
                     sample_scalar(self.elastic_deform_scale, image=data_dict['image'], dim=i, patch_size=self.patch_size)
-                    for i in range(0, 3)
+                    for i in range(dim)
                     ]
 
             # sigmas must be in pixels, as this will be applied to the deformation field
@@ -103,7 +103,7 @@ class SpatialTransform(BasicTransform):
             magnitude = [
                 sample_scalar(self.elastic_deform_magnitude, image=data_dict['image'], patch_size=self.patch_size,
                               dim=i, deformation_scale=deformation_scales[i])
-                for i in range(0, 3)]
+                for i in range(dim)]
             # doing it like this for better memory layout for blurring
             offsets = torch.normal(mean=0, std=1, size=(dim, *self.patch_size))
 
@@ -120,7 +120,8 @@ class SpatialTransform(BasicTransform):
 
                 mx = torch.max(torch.abs(offsets[d]))
                 offsets[d] /= (mx / np.clip(magnitude[d], a_min=1e-8, a_max=np.inf))
-            offsets = torch.permute(offsets, (1, 2, 3, 0))
+            spatial_dims = tuple(list(range(1, dim + 1)))
+            offsets = torch.permute(offsets, (*spatial_dims, 0))
         else:
             offsets = None
 
