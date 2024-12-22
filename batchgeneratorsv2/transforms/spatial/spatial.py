@@ -7,7 +7,7 @@ import SimpleITK
 import numpy as np
 import pandas as pd
 import torch
-from scipy.ndimage import fourier_gaussian
+from scipy.ndimage import fourier_gaussian, gaussian_filter
 from torch import Tensor
 from torch.nn.functional import grid_sample
 
@@ -31,7 +31,9 @@ class SpatialTransform(BasicTransform):
                  scaling: RandomScalar = (0.7, 1.3),
                  p_synchronize_scaling_across_axes: float = 0,
                  bg_style_seg_sampling: bool = True,
-                 mode_seg: str = 'bilinear'
+                 mode_seg: str = 'bilinear',
+                 border_mode_seg: str = "zeros",
+                 center_deformation: bool = True
                  ):
         """
         magnitude must be given in pixels!
@@ -53,6 +55,8 @@ class SpatialTransform(BasicTransform):
         self.p_synchronize_def_scale_across_axes = p_synchronize_def_scale_across_axes
         self.bg_style_seg_sampling = bg_style_seg_sampling
         self.mode_seg = mode_seg
+        self.border_mode_seg = border_mode_seg
+        self.center_deformation = center_deformation
 
     def get_parameters(self, **data_dict) -> dict:
         dim = data_dict['image'].ndim - 1
@@ -118,6 +122,11 @@ class SpatialTransform(BasicTransform):
                 tmp = fourier_gaussian(tmp, sigmas[d])
                 offsets[d] = torch.from_numpy(np.fft.ifftn(tmp).real)
 
+                # tmp = offsets[d].numpy().astype(np.float64)
+                # gaussian_filter(tmp, sigmas[d], 0, output=tmp)
+                # offsets[d] = torch.from_numpy(tmp).to(offsets.dtype)
+                # print(offsets.dtype)
+
                 mx = torch.max(torch.abs(offsets[d]))
                 offsets[d] /= (mx / np.clip(magnitude[d], a_min=1e-8, a_max=np.inf))
             spatial_dims = tuple(list(range(1, dim + 1)))
@@ -162,7 +171,7 @@ class SpatialTransform(BasicTransform):
 
             # we center the grid around the center_location_in_pixels. We should center the mean of the grid, not the center position
             # only do this if we elastic deform
-            if params['elastic_offsets'] is not None:
+            if self.center_deformation and params['elastic_offsets'] is not None:
                 mn = grid.mean(dim=list(range(img.ndim - 1)))
             else:
                 mn = 0
@@ -194,7 +203,7 @@ class SpatialTransform(BasicTransform):
                 grid = torch.matmul(grid, torch.from_numpy(params['affine']).float())
 
             # we center the grid around the center_location_in_pixels. We should center the mean of the grid, not the center coordinate
-            if params['elastic_offsets'] is not None:
+            if self.center_deformation and params['elastic_offsets'] is not None:
                 mn = grid.mean(dim=list(range(segmentation.ndim - 1)))
             else:
                 mn = 0
@@ -209,7 +218,7 @@ class SpatialTransform(BasicTransform):
                                 segmentation[None].float(),
                                 grid[None],
                                 mode=self.mode_seg,
-                                padding_mode="zeros",
+                                padding_mode=self.border_mode_seg,
                                 align_corners=False
                             )[0].to(segmentation.dtype)
             else:
@@ -223,7 +232,7 @@ class SpatialTransform(BasicTransform):
                                     ((segmentation[c] == labels[1]).float())[None, None],
                                     grid[None],
                                     mode=self.mode_seg,
-                                    padding_mode="zeros",
+                                    padding_mode=self.border_mode_seg,
                                     align_corners=False
                                 )[0][0] >= 0.5
                             result_seg[c][out] = labels[1]
@@ -235,7 +244,7 @@ class SpatialTransform(BasicTransform):
                                         ((segmentation[c] == u).float())[None, None],
                                         grid[None],
                                         mode=self.mode_seg,
-                                        padding_mode="zeros",
+                                        padding_mode=self.border_mode_seg,
                                         align_corners=False
                                     )[0][0] >= 0.5] = u
                 else:
@@ -247,7 +256,7 @@ class SpatialTransform(BasicTransform):
                         done_mask = torch.zeros(*self.patch_size, dtype=torch.bool)
                         for i, u in enumerate(labels):
                             tmp[i] = grid_sample(((segmentation[c] == u).float() * scale_factor)[None, None], grid[None],
-                                                 mode=self.mode_seg, padding_mode="zeros", align_corners=False)[0][0]
+                                                 mode=self.mode_seg, padding_mode=self.border_mode_seg, align_corners=False)[0][0]
                             mask = tmp[i] > (0.7 * scale_factor)
                             result_seg[c][mask] = u
                             done_mask = done_mask | mask
