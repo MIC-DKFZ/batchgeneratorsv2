@@ -37,6 +37,7 @@ class SpatialTransform(BasicTransform):
                  ):
         """
         magnitude must be given in pixels!
+        deformation scale is given as a paercentage of the edge length
         """
         super().__init__()
         self.patch_size = patch_size
