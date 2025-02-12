@@ -170,7 +170,7 @@ class SpatialTransform(BasicTransform):
                 pad_kwargs = {}
             elif self.padding_mode_image == 'zeros':
                 pad_mode = 'constant'
-                {'value': 0}
+                pad_kwargs = {'value': 0}
             elif self.padding_mode_image == 'border':
                 pad_mode = 'replicate'
                 pad_kwargs = {}
