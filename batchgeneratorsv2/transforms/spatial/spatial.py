@@ -33,11 +33,15 @@ class SpatialTransform(BasicTransform):
                  bg_style_seg_sampling: bool = True,
                  mode_seg: str = 'bilinear',
                  border_mode_seg: str = "zeros",
-                 center_deformation: bool = True
+                 center_deformation: bool = True,
+                 padding_mode_image: str = "zeros"
                  ):
         """
         magnitude must be given in pixels!
         deformation scale is given as a paercentage of the edge length
+        
+        padding_mode_image: see torch grid_sample documentation. This currently applies to image and regression target 
+        because both call self._apply_to_image. Can be "zeros", "reflection", "border"
         """
         super().__init__()
         self.patch_size = patch_size
@@ -58,6 +62,7 @@ class SpatialTransform(BasicTransform):
         self.mode_seg = mode_seg
         self.border_mode_seg = border_mode_seg
         self.center_deformation = center_deformation
+        self.padding_mode_image = padding_mode_image
 
     def get_parameters(self, **data_dict) -> dict:
         dim = data_dict['image'].ndim - 1
@@ -180,7 +185,7 @@ class SpatialTransform(BasicTransform):
             new_center = torch.Tensor([c - s / 2 for c, s in zip(params['center_location_in_pixels'], img.shape[1:])])
             grid += (new_center - mn)
             return grid_sample(img[None], _convert_my_grid_to_grid_sample_grid(grid, img.shape[1:])[None],
-                               mode='bilinear', padding_mode="zeros", align_corners=False)[0]
+                               mode='bilinear', padding_mode=self.padding_mode_image, align_corners=False)[0]
 
     def _apply_to_segmentation(self, segmentation: torch.Tensor, **params) -> torch.Tensor:
         segmentation = segmentation.contiguous()
