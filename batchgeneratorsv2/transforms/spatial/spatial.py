@@ -163,8 +163,22 @@ class SpatialTransform(BasicTransform):
             # No spatial transformation is being done. Round grid_center and crop without having to interpolate.
             # This saves compute.
             # cropping requires the center to be given as integer coordinates
-            img = crop_tensor(img, [math.floor(i) for i in params['center_location_in_pixels']], self.patch_size, pad_mode='constant',
-                              pad_kwargs={'value': 0})
+
+            # torch is inconsistent. AAAAaaah
+            if self.padding_mode_image == 'reflection':
+                pad_mode = 'reflect'
+                pad_kwargs = {}
+            elif self.padding_mode_image == 'zeros':
+                pad_mode = 'constant'
+                {'value': 0}
+            elif self.padding_mode_image == 'border':
+                pad_mode = 'replicate'
+                pad_kwargs = {}
+            else:
+                raise RuntimeError('Unknown pad mode')
+
+            img = crop_tensor(img, [math.floor(i) for i in params['center_location_in_pixels']], self.patch_size, pad_mode=pad_mode,
+                              pad_kwargs=pad_kwargs)
             return img
         else:
             grid = _create_centered_identity_grid2(self.patch_size)
@@ -184,6 +198,7 @@ class SpatialTransform(BasicTransform):
 
             new_center = torch.Tensor([c - s / 2 for c, s in zip(params['center_location_in_pixels'], img.shape[1:])])
             grid += (new_center - mn)
+            # print(f'grid sample with pad mode {self.padding_mode_image}')
             return grid_sample(img[None], _convert_my_grid_to_grid_sample_grid(grid, img.shape[1:])[None],
                                mode='bilinear', padding_mode=self.padding_mode_image, align_corners=False)[0]
 
