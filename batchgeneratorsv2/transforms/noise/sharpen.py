@@ -115,7 +115,7 @@ if __name__ == '__main__':
 
     # Instantiate the transform
     transform = SharpeningTransform(
-        strength=(1, 1.1),  # Sharpening strength range
+        strength=(2, 2.1),  # Sharpening strength range
         p_same_for_each_channel=1.0,  # Force same strength for all channels (only 1 channel here)
         p_per_channel=1.0,  # Always apply
         p_clamp_intensities = 1
@@ -124,3 +124,5 @@ if __name__ == '__main__':
     # Generate parameters and apply
     params = transform.get_parameters(image=img_torch)
     sharpened = transform._apply_to_image(img_torch, **params)
+    from batchviewer import view_batch
+    view_batch(img_np, sharpened)

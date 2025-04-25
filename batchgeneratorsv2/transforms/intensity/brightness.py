@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 
 from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
@@ -33,9 +34,51 @@ class MultiplicativeBrightnessTransform(ImageOnlyTransform):
         return img
 
 
+class BrightnessAdditiveTransform(ImageOnlyTransform):
+    """
+    Adds random additive brightness noise sampled from a Gaussian distribution (mu, sigma).
+
+    Supports per-channel brightness sampling or shared brightness across all channels.
+
+    Args:
+        mu (float): Mean of the Gaussian used to sample brightness shifts.
+        sigma (float): Standard deviation of the Gaussian.
+        per_channel (bool): If True, brightness shifts are sampled separately per channel.
+        p_per_channel (float): Probability to apply the brightness shift to each channel.
+    """
+
+    def __init__(self,
+                 mu: float,
+                 sigma: float,
+                 per_channel: bool = True,
+                 p_per_channel: float = 1.0):
+        super().__init__()
+        self.mu = mu
+        self.sigma = sigma
+        self.per_channel = per_channel
+        self.p_per_channel = p_per_channel
+
+    def get_parameters(self, image: torch.Tensor, **kwargs) -> dict:
+        C = image.shape[0]
+        apply_channel = [np.random.rand() < self.p_per_channel for _ in range(C)]
+
+        if self.per_channel:
+            brightness = [np.random.normal(self.mu, self.sigma) if apply else None for apply in apply_channel]
+        else:
+            global_brightness = np.random.normal(self.mu, self.sigma)
+            brightness = [global_brightness if apply else None for apply in apply_channel]
+
+        return {'brightness': brightness}
+
+    def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
+        for c, b in enumerate(params['brightness']):
+            if b is not None:
+                img[c].add_(float(b))
+        return img
+
+
 if __name__ == '__main__':
     from time import time
-    import numpy as np
     import os
 
     os.environ['OMP_NUM_THREADS'] = '1'

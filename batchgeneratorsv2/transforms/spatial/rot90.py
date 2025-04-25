@@ -24,7 +24,7 @@ class Rot90Transform(BasicTransform):
         self.allowed_axes = allowed_axes
 
     def get_parameters(self, **data_dict) -> dict:
-        n_axes_combinations = sample_scalar(self.num_axis_combinations)
+        n_axes_combinations = round(sample_scalar(self.num_axis_combinations))
         axis_combinations = []
         num_rot_per_combination = []
         for i in range(n_axes_combinations):

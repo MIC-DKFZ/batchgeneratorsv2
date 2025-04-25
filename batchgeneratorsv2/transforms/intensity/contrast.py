@@ -25,6 +25,7 @@ class BGContrast():
     def __repr__(self):
         return self.__class__.__name__ + f"(contrast_range={self.contrast_range})"
 
+
 class ContrastTransform(ImageOnlyTransform):
     def __init__(self, contrast_range: RandomScalar, preserve_range: bool, synchronize_channels: bool, p_per_channel: float = 1):
         super().__init__()
