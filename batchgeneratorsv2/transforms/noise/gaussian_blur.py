@@ -77,7 +77,7 @@ class GaussianBlurTransform(ImageOnlyTransform):
                  benchmark: bool = False
                  ):
         """
-        uses separable gaussian filters for all the speed
+        Uses separable gaussian filters for all the speed. Note : Benchmark = True will likely make the transform non deterministic.
 
         blur_sigma, if callable, will be called as blur_sigma(image, shape, dim) where shape is (c, x(, y, z) and dim i
         s 1, 2 or 3 for x, y and z, respectively)
