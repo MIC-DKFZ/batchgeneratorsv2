@@ -115,27 +115,18 @@ class SpatialTransform(BasicTransform):
                               dim=i, deformation_scale=deformation_scales[i])
                 for i in range(dim)]
             # doing it like this for better memory layout for blurring
-            offsets = torch.normal(mean=0, std=1, size=(dim, *self.patch_size))
+            offsets_np = np.random.randn(dim, *self.patch_size).astype(np.float32)
 
-            # all the additional time elastic deform takes is spent here
             for d in range(dim):
-                # fft torch, slower
-                # for i in range(offsets.ndim - 1):
-                #     offsets[d] = blur_dimension(offsets[d][None], sigmas[d], i, force_use_fft=True, truncate=6)[0]
-
-                # fft numpy, this is faster o.O
-                tmp = np.fft.fftn(offsets[d].numpy())
+                tmp = np.fft.fftn(offsets_np[d])
                 tmp = fourier_gaussian(tmp, sigmas[d])
-                offsets[d] = torch.from_numpy(np.fft.ifftn(tmp).real)
+                offsets_np[d] = np.fft.ifftn(tmp).real
 
-                # tmp = offsets[d].numpy().astype(np.float64)
-                # gaussian_filter(tmp, sigmas[d], 0, output=tmp)
-                # offsets[d] = torch.from_numpy(tmp).to(offsets.dtype)
-                # print(offsets.dtype)
-
-                mx = torch.max(torch.abs(offsets[d]))
-                offsets[d] /= (mx / np.clip(magnitude[d], a_min=1e-8, a_max=np.inf))
+                mx = np.max(np.abs(offsets_np[d]))
+                offsets_np[d] /= (mx / np.clip(magnitude[d], a_min=1e-8, a_max=np.inf))
+            
             spatial_dims = tuple(list(range(1, dim + 1)))
+            offsets = torch.from_numpy(offsets_np)
             offsets = torch.permute(offsets, (*spatial_dims, 0))
         else:
             offsets = None

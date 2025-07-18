@@ -77,7 +77,7 @@ class GaussianBlurTransform(ImageOnlyTransform):
                  benchmark: bool = False
                  ):
         """
-        uses separable gaussian filters for all the speed
+        Uses separable gaussian filters for all the speed. Note : Benchmark = True will likely make the transform non deterministic.
 
         blur_sigma, if callable, will be called as blur_sigma(image, shape, dim) where shape is (c, x(, y, z) and dim i
         s 1, 2 or 3 for x, y and z, respectively)
@@ -99,7 +99,7 @@ class GaussianBlurTransform(ImageOnlyTransform):
         shape = data_dict['image'].shape
         dims = len(shape) - 1
         dct = {}
-        dct['apply_to_channel'] = torch.rand(shape[0]) < self.p_per_channel
+        dct['apply_to_channel'] = np.random.rand(shape[0]) < self.p_per_channel
         if self.synchronize_axes:
             dct['sigmas'] = \
                 [[sample_scalar(self.blur_sigma, shape, dim=None)] * dims

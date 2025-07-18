@@ -83,7 +83,7 @@ class ApplyRandomBinaryOperatorTransform(ImageOnlyTransform):
     def get_parameters(self, **data_dict) -> dict:
         # this needs to be applied in random order to the channels
         np.random.shuffle(self.channel_idx)
-        apply_to_channels = [self.channel_idx[i] for i, j in enumerate(torch.rand(len(self.channel_idx)) < self.p_per_label) if j]
+        apply_to_channels = [self.channel_idx[i] for i, j in enumerate(np.random.rand(len(self.channel_idx)) < self.p_per_label) if j]
         operators = [np.random.choice(self.any_of_these) for _ in apply_to_channels]
         strel_size = [sample_scalar(self.strel_size, image=data_dict['image'], channel=a) for a in apply_to_channels]
         return {
