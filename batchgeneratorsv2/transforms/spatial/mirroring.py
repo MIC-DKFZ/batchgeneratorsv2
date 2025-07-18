@@ -4,6 +4,7 @@ import torch
 
 from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 
+import numpy as np
 
 class MirrorTransform(BasicTransform):
     def __init__(self, allowed_axes: Tuple[int, ...]):
