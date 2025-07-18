@@ -11,7 +11,7 @@ class MirrorTransform(BasicTransform):
         self.allowed_axes = allowed_axes
 
     def get_parameters(self, **data_dict) -> dict:
-        axes = [i for i in self.allowed_axes if torch.rand(1) < 0.5]
+        axes = [i for i in self.allowed_axes if np.random.rand() < 0.5]
         return {
             'axes': axes
         }

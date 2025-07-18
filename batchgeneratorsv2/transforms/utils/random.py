@@ -13,7 +13,7 @@ class RandomTransform(BasicTransform):
         self.apply_probability = apply_probability
 
     def get_parameters(self, **data_dict) -> dict:
-        return {"apply_transform": torch.rand(1).item() < self.apply_probability}
+        return {"apply_transform": np.random.rand() < self.apply_probability}
 
     def apply(self, data_dict: dict, **params) -> dict:
         if params['apply_transform']:

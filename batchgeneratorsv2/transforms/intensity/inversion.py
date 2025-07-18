@@ -18,7 +18,8 @@ class InvertImageTransform(ImageOnlyTransform):
             if np.random.uniform() < self.p_synchronize_channels:
                 apply_to_channel = torch.arange(0, shape[0])
             else:
-                apply_to_channel = torch.where(torch.rand(shape[0]) < self.p_per_channel)[0]
+                apply_to_channel_np = np.where(np.random.rand(shape[0]) < self.p_per_channel)[0]
+                apply_to_channel = torch.from_numpy(apply_to_channel_np)
         else:
             apply_to_channel = []
         return {

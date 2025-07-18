@@ -1,7 +1,7 @@
 import torch
 from typing import Tuple
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
-
+import numpy as np
 
 class RicianNoiseTransform(ImageOnlyTransform):
     """
@@ -21,8 +21,10 @@ class RicianNoiseTransform(ImageOnlyTransform):
 
     def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
         var = params['variance']
-        noise_real = torch.empty_like(img).normal_(mean=0.0, std=var)
-        noise_imag = torch.empty_like(img).normal_(mean=0.0, std=var)
+        noise_real_np = np.random.normal(0.0, var, size=img.shape).astype(np.float32)
+        noise_imag_np = np.random.normal(0.0, var, size=img.shape).astype(np.float32)
+        noise_real = torch.from_numpy(noise_real_np).to(img.device)
+        noise_imag = torch.from_numpy(noise_imag_np).to(img.device)
 
         min_val = img.min()
         shifted = img - min_val

@@ -36,7 +36,8 @@ class ContrastTransform(ImageOnlyTransform):
 
     def get_parameters(self, **data_dict) -> dict:
         shape = data_dict['image'].shape
-        apply_to_channel = torch.where(torch.rand(shape[0]) < self.p_per_channel)[0]
+        apply_to_channel_np = np.where(np.random.rand(shape[0]) < self.p_per_channel)[0]
+        apply_to_channel = torch.from_numpy(apply_to_channel_np)
         if self.synchronize_channels:
             multipliers = torch.Tensor([sample_scalar(self.contrast_range, image=data_dict['image'], channel=None)] * len(apply_to_channel))
         else:

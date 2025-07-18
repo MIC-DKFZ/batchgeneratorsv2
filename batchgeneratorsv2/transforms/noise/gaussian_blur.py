@@ -99,7 +99,7 @@ class GaussianBlurTransform(ImageOnlyTransform):
         shape = data_dict['image'].shape
         dims = len(shape) - 1
         dct = {}
-        dct['apply_to_channel'] = torch.rand(shape[0]) < self.p_per_channel
+        dct['apply_to_channel'] = np.random.rand(shape[0]) < self.p_per_channel
         if self.synchronize_axes:
             dct['sigmas'] = \
                 [[sample_scalar(self.blur_sigma, shape, dim=None)] * dims

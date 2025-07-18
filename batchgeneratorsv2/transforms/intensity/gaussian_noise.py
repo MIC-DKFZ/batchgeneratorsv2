@@ -5,6 +5,8 @@ from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
 import torch
 
+import numpy as np
+
 
 class GaussianNoiseTransform(ImageOnlyTransform):
     def __init__(self,
@@ -19,7 +21,7 @@ class GaussianNoiseTransform(ImageOnlyTransform):
     def get_parameters(self, **data_dict) -> dict:
         shape = data_dict['image'].shape
         dct = {}
-        dct['apply_to_channel'] = torch.rand(shape[0]) < self.p_per_channel
+        dct['apply_to_channel'] = np.random.rand(shape[0]) < self.p_per_channel
         dct['sigmas'] = \
             [sample_scalar(self.noise_variance, data_dict['image'])
              for i in range(sum(dct['apply_to_channel']))] if not self.synchronize_channels \
@@ -36,15 +38,12 @@ class GaussianNoiseTransform(ImageOnlyTransform):
     def _sample_gaussian_noise(self, img_shape: Tuple[int, ...], **params):
         if not isinstance(params['sigmas'], list):
             num_channels = sum(params['apply_to_channel'])
-            # gaussian = torch.tile(torch.normal(0, params['sigmas'], size=(1, *img_shape[1:])),
-            #                       (num_channels, *[1]*(len(img_shape) - 1)))
-            gaussian = torch.normal(0, params['sigmas'], size=(1, *img_shape[1:]))
-            gaussian.expand((num_channels, *[-1]*(len(img_shape) - 1)))
+            noise_np = np.random.normal(0, params['sigmas'], size=(1, *img_shape[1:]))
+            gaussian = torch.from_numpy(noise_np.astype(np.float32))
+            gaussian = gaussian.expand((num_channels, *[-1]*(len(img_shape) - 1)))
         else:
-            gaussian = [
-                torch.normal(0, i, size=(1, *img_shape[1:])) for i in params['sigmas']
-            ]
-            gaussian = torch.cat(gaussian, dim=0)
+            noise_np_list = [np.random.normal(0, i, size=(1, *img_shape[1:])) for i in params['sigmas']]
+            gaussian = torch.cat([torch.from_numpy(n.astype(np.float32)) for n in noise_np_list], dim=0)
         return gaussian
 
 

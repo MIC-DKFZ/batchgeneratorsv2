@@ -5,6 +5,7 @@ import torch
 from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
 
+import numpy as np
 
 class GammaTransform(ImageOnlyTransform):
     def __init__(self, gamma: RandomScalar, p_invert_image: float, synchronize_channels: bool, p_per_channel: float,
@@ -18,9 +19,11 @@ class GammaTransform(ImageOnlyTransform):
 
     def get_parameters(self, **data_dict) -> dict:
         shape = data_dict['image'].shape
-        apply_to_channel = torch.where(torch.rand(shape[0]) < self.p_per_channel)[0]
-        retain_stats = torch.rand(len(apply_to_channel)) < self.p_retain_stats
-        invert_image = torch.rand(len(apply_to_channel)) < self.p_invert_image
+        apply_to_channel_np = np.where(np.random.rand(shape[0]) < self.p_per_channel)[0]
+        apply_to_channel = torch.from_numpy(apply_to_channel_np)
+        
+        retain_stats = torch.from_numpy(np.random.rand(len(apply_to_channel)) < self.p_retain_stats)
+        invert_image = torch.from_numpy(np.random.rand(len(apply_to_channel)) < self.p_invert_image)
 
         if self.synchronize_channels:
             gamma = torch.Tensor([sample_scalar(self.gamma, image=data_dict['image'], channel=None)] * len(apply_to_channel))
