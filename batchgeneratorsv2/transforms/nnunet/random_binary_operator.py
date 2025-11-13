@@ -3,7 +3,7 @@ from typing import Union, List, Tuple, Callable
 
 import numpy as np
 import torch
-from fft_conv_pytorch import fft_conv
+from torch_fftconv import fft_conv2d, fft_conv3d
 
 from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
@@ -30,11 +30,12 @@ def binary_dilation_torch(input_tensor, structure_element):
         raise ValueError("Input tensor must be 2D (X, Y) or 3D (X, Y, Z).")
 
     # Perform the convolution
-    # if num_dims == 2:  # 2D convolution
-    #     output = F.conv2d(input_tensor.unsqueeze(0).unsqueeze(0), structure_element, padding='same')
-    # elif num_dims == 3:  # 3D convolution
-    #     output = F.conv3d(input_tensor.unsqueeze(0).unsqueeze(0), structure_element, padding='same')
-    output = torch.round(fft_conv(input_tensor.unsqueeze(0).unsqueeze(0), structure_element, padding='same'), decimals=0)
+    input_tensor = input_tensor.unsqueeze(0).unsqueeze(0)
+    if num_dims == 2:  # 2D convolution
+        output = fft_conv2d(input_tensor, structure_element, padding='same')
+    elif num_dims == 3:  # 3D convolution
+        output = fft_conv3d(input_tensor, structure_element, padding='same')
+    output = torch.round(output, decimals=0)
 
     # Threshold to get binary output
     output = output > 0

@@ -8,7 +8,7 @@ from torch.nn.functional import pad, conv3d, conv1d, conv2d
 
 from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
-from fft_conv_pytorch import fft_conv
+from torch_fftconv import fft_conv1d, fft_conv2d, fft_conv3d
 
 
 def blur_dimension(img: torch.Tensor, sigma: float, dim_to_blur: int, force_use_fft: bool = None, truncate: float = 6):
@@ -31,8 +31,9 @@ def blur_dimension(img: torch.Tensor, sigma: float, dim_to_blur: int, force_use_
 
     # Dynamically set up padding, convolution operation, and kernel shape based on the number of spatial dimensions
     conv_ops = {1: conv1d, 2: conv2d, 3: conv3d}
+    fft_conv_ops = {1: fft_conv1d, 2: fft_conv2d, 3: fft_conv3d}
     if force_use_fft is not None:
-        conv_op = conv_ops[spatial_dims] if not force_use_fft else fft_conv
+        conv_op = conv_ops[spatial_dims] if not force_use_fft else fft_conv_ops[spatial_dims]
     else:
         conv_op = conv_ops[spatial_dims]
 

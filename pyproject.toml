@@ -32,7 +32,7 @@ keywords = [
 dependencies = [
     "torch>=2.0.0",
     "numpy",
-    "fft-conv-pytorch",
+    "torch-fftconv",
     "batchgenerators>=0.25"
 ]
 
