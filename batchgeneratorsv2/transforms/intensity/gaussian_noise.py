@@ -29,20 +29,21 @@ class GaussianNoiseTransform(ImageOnlyTransform):
     def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
         if sum(params['apply_to_channel']) == 0:
             return img
-        gaussian_noise = self._sample_gaussian_noise(img.shape, **params)
+        gaussian_noise = self._sample_gaussian_noise(img, **params)
         img[params['apply_to_channel']] += gaussian_noise
         return img
 
-    def _sample_gaussian_noise(self, img_shape: Tuple[int, ...], **params):
+    def _sample_gaussian_noise(self, img: torch.Tensor, **params):
+        img_shape = img.shape
         if not isinstance(params['sigmas'], list):
             num_channels = sum(params['apply_to_channel'])
             # gaussian = torch.tile(torch.normal(0, params['sigmas'], size=(1, *img_shape[1:])),
             #                       (num_channels, *[1]*(len(img_shape) - 1)))
-            gaussian = torch.normal(0, params['sigmas'], size=(1, *img_shape[1:]))
+            gaussian = torch.normal(0, params['sigmas'], size=(1, *img_shape[1:]), device=img.device)
             gaussian.expand((num_channels, *[-1]*(len(img_shape) - 1)))
         else:
             gaussian = [
-                torch.normal(0, i, size=(1, *img_shape[1:])) for i in params['sigmas']
+                torch.normal(0, i, size=(1, *img_shape[1:]), device=img.device) for i in params['sigmas']
             ]
             gaussian = torch.cat(gaussian, dim=0)
         return gaussian
