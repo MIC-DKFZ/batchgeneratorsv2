@@ -229,7 +229,7 @@ class SpatialTransform(BasicTransform):
                                 align_corners=False
                             )[0].to(segmentation.dtype)
             else:
-                result_seg = torch.zeros((segmentation.shape[0], *self.patch_size), dtype=segmentation.dtype)
+                result_seg = torch.zeros((segmentation.shape[0], *self.patch_size), dtype=segmentation.dtype, device=segmentation.device)
                 if self.bg_style_seg_sampling:
                     for c in range(segmentation.shape[0]):
                         labels = torch.from_numpy(np.sort(pd.unique(segmentation[c].numpy().ravel())))
@@ -255,12 +255,21 @@ class SpatialTransform(BasicTransform):
                                         align_corners=False
                                     )[0][0] >= 0.5] = u
                 else:
+                    # start_event = torch.cuda.Event(enable_timing=True)
+                    # end_event = torch.cuda.Event(enable_timing=True)
+                    # start_event.record()
+
+                    # Etienne: this code is quite crazy, why not simply doing a one-hot encoding and then doing grid_sample?
                     for c in range(segmentation.shape[0]):
-                        labels = torch.from_numpy(np.sort(pd.unique(segmentation[c].numpy().ravel())))
-                        #torch.where(torch.bincount(segmentation.ravel()) > 0)[0].to(segmentation.dtype)
-                        tmp = torch.zeros((len(labels), *self.patch_size), dtype=torch.float16)
+                        # labels = torch.from_numpy(np.sort(pd.unique(segmentation[c].numpy().ravel())))
+                        # torch.where(torch.bincount(segmentation.ravel()) > 0)[0].to(segmentation.dtype)
+                        if segmentation.device == torch.device('cpu'):
+                            labels = torch.from_numpy(np.sort(pd.unique(segmentation[c].numpy().ravel())))
+                        else:
+                            labels = torch.sort(torch.unique(segmentation[c]))[0]
+                        tmp = torch.zeros((len(labels), *self.patch_size), dtype=torch.float16, device=segmentation.device)
                         scale_factor = 1000
-                        done_mask = torch.zeros(*self.patch_size, dtype=torch.bool)
+                        done_mask = torch.zeros(*self.patch_size, dtype=torch.bool, device=segmentation.device)
                         for i, u in enumerate(labels):
                             tmp[i] = grid_sample(((segmentation[c] == u).float() * scale_factor)[None, None], grid[None],
                                                  mode=self.mode_seg, padding_mode=self.border_mode_seg, align_corners=False)[0][0]
@@ -270,6 +279,11 @@ class SpatialTransform(BasicTransform):
                         if not torch.all(done_mask):
                             result_seg[c][~done_mask] = labels[tmp[:, ~done_mask].argmax(0)]
                         del tmp
+
+                    # end_event.record()
+                    # torch.cuda.synchronize()
+                    # gpu_aug_time = start_event.elapsed_time(end_event) / 1000  # Convert ms to seconds
+                    # print(f"{gpu_aug_time:.3f}s for spatial augmentation")
             del grid
             return result_seg.contiguous()
 
