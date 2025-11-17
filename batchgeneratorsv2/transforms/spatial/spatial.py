@@ -39,8 +39,8 @@ class SpatialTransform(BasicTransform):
         """
         magnitude must be given in pixels!
         deformation scale is given as a paercentage of the edge length
-        
-        padding_mode_image: see torch grid_sample documentation. This currently applies to image and regression target 
+
+        padding_mode_image: see torch grid_sample documentation. This currently applies to image and regression target
         because both call self._apply_to_image. Can be "zeros", "reflection", "border"
         """
         super().__init__()
@@ -158,6 +158,24 @@ class SpatialTransform(BasicTransform):
             'center_location_in_pixels': center_location_in_pixels
         }
 
+    def prepare_grid(self, img: torch.Tensor, **params) -> torch.Tensor:
+        grid = _create_centered_identity_grid2(self.patch_size, img.device)
+        if params['elastic_offsets'] is not None:
+            grid += params['elastic_offsets']
+        if params['affine'] is not None:
+            grid = torch.matmul(grid, torch.from_numpy(params['affine']).float().to(img.device))
+
+        # we center the grid around the center_location_in_pixels. We should center the mean of the grid, not the center position
+        # only do this if we elastic deform
+        if self.center_deformation and params['elastic_offsets'] is not None:
+            mn = grid.mean(dim=list(range(img.ndim - 1)))
+        else:
+            mn = 0
+
+        new_center = torch.Tensor([c - s / 2 for c, s in zip(params['center_location_in_pixels'], img.shape[1:])]).to(img.device)
+        grid += (new_center - mn)
+        return grid
+
     def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
         if params['affine'] is None and params['elastic_offsets'] is None:
             # No spatial transformation is being done. Round grid_center and crop without having to interpolate.
@@ -181,23 +199,7 @@ class SpatialTransform(BasicTransform):
                               pad_kwargs=pad_kwargs)
             return img
         else:
-            grid = _create_centered_identity_grid2(self.patch_size)
-
-            # we deform first, then rotate
-            if params['elastic_offsets'] is not None:
-                grid += params['elastic_offsets']
-            if params['affine'] is not None:
-                grid = torch.matmul(grid, torch.from_numpy(params['affine']).float())
-
-            # we center the grid around the center_location_in_pixels. We should center the mean of the grid, not the center position
-            # only do this if we elastic deform
-            if self.center_deformation and params['elastic_offsets'] is not None:
-                mn = grid.mean(dim=list(range(img.ndim - 1)))
-            else:
-                mn = 0
-
-            new_center = torch.Tensor([c - s / 2 for c, s in zip(params['center_location_in_pixels'], img.shape[1:])])
-            grid += (new_center - mn)
+            grid = self.prepare_grid(img, **params)
             # print(f'grid sample with pad mode {self.padding_mode_image}')
             return grid_sample(img[None], _convert_my_grid_to_grid_sample_grid(grid, img.shape[1:])[None],
                                mode='bilinear', padding_mode=self.padding_mode_image, align_corners=False)[0]
@@ -215,24 +217,8 @@ class SpatialTransform(BasicTransform):
                                        pad_kwargs={'value': 0})
             return segmentation
         else:
-            grid = _create_centered_identity_grid2(self.patch_size)
 
-            # we deform first, then rotate
-            if params['elastic_offsets'] is not None:
-                grid += params['elastic_offsets']
-            if params['affine'] is not None:
-                grid = torch.matmul(grid, torch.from_numpy(params['affine']).float())
-
-            # we center the grid around the center_location_in_pixels. We should center the mean of the grid, not the center coordinate
-            if self.center_deformation and params['elastic_offsets'] is not None:
-                mn = grid.mean(dim=list(range(segmentation.ndim - 1)))
-            else:
-                mn = 0
-
-            new_center = torch.Tensor([c - s / 2 for c, s in zip(params['center_location_in_pixels'], segmentation.shape[1:])])
-
-            grid += (new_center - mn)
-            grid = _convert_my_grid_to_grid_sample_grid(grid, segmentation.shape[1:])
+            grid = self.prepare_grid(segmentation, **params)
 
             if self.mode_seg == 'nearest':
                 result_seg = grid_sample(
@@ -243,7 +229,7 @@ class SpatialTransform(BasicTransform):
                                 align_corners=False
                             )[0].to(segmentation.dtype)
             else:
-                result_seg = torch.zeros((segmentation.shape[0], *self.patch_size), dtype=segmentation.dtype)
+                result_seg = torch.zeros((segmentation.shape[0], *self.patch_size), dtype=segmentation.dtype, device=segmentation.device)
                 if self.bg_style_seg_sampling:
                     for c in range(segmentation.shape[0]):
                         labels = torch.from_numpy(np.sort(pd.unique(segmentation[c].numpy().ravel())))
@@ -269,12 +255,21 @@ class SpatialTransform(BasicTransform):
                                         align_corners=False
                                     )[0][0] >= 0.5] = u
                 else:
+                    # start_event = torch.cuda.Event(enable_timing=True)
+                    # end_event = torch.cuda.Event(enable_timing=True)
+                    # start_event.record()
+
+                    # Etienne: this code is quite crazy, why not simply doing a one-hot encoding and then doing grid_sample?
                     for c in range(segmentation.shape[0]):
-                        labels = torch.from_numpy(np.sort(pd.unique(segmentation[c].numpy().ravel())))
-                        #torch.where(torch.bincount(segmentation.ravel()) > 0)[0].to(segmentation.dtype)
-                        tmp = torch.zeros((len(labels), *self.patch_size), dtype=torch.float16)
+                        # labels = torch.from_numpy(np.sort(pd.unique(segmentation[c].numpy().ravel())))
+                        # torch.where(torch.bincount(segmentation.ravel()) > 0)[0].to(segmentation.dtype)
+                        if segmentation.device == torch.device('cpu'):
+                            labels = torch.from_numpy(np.sort(pd.unique(segmentation[c].numpy().ravel())))
+                        else:
+                            labels = torch.sort(torch.unique(segmentation[c]))[0]
+                        tmp = torch.zeros((len(labels), *self.patch_size), dtype=torch.float16, device=segmentation.device)
                         scale_factor = 1000
-                        done_mask = torch.zeros(*self.patch_size, dtype=torch.bool)
+                        done_mask = torch.zeros(*self.patch_size, dtype=torch.bool, device=segmentation.device)
                         for i, u in enumerate(labels):
                             tmp[i] = grid_sample(((segmentation[c] == u).float() * scale_factor)[None, None], grid[None],
                                                  mode=self.mode_seg, padding_mode=self.border_mode_seg, align_corners=False)[0][0]
@@ -284,6 +279,11 @@ class SpatialTransform(BasicTransform):
                         if not torch.all(done_mask):
                             result_seg[c][~done_mask] = labels[tmp[:, ~done_mask].argmax(0)]
                         del tmp
+
+                    # end_event.record()
+                    # torch.cuda.synchronize()
+                    # gpu_aug_time = start_event.elapsed_time(end_event) / 1000  # Convert ms to seconds
+                    # print(f"{gpu_aug_time:.3f}s for spatial augmentation")
             del grid
             return result_seg.contiguous()
 
@@ -341,8 +341,8 @@ def create_affine_matrix_2d(rotation_angle, scaling_factors):
 #     return grid
 
 
-def _create_centered_identity_grid2(size: Union[Tuple[int, ...], List[int]]) -> torch.Tensor:
-    space = [torch.linspace((1 - s) / 2, (s - 1) / 2, s) for s in size]
+def _create_centered_identity_grid2(size: Union[Tuple[int, ...], List[int]], device: torch.device) -> torch.Tensor:
+    space = [torch.linspace((1 - s) / 2, (s - 1) / 2, s).to(device) for s in size]
     grid = torch.meshgrid(space, indexing="ij")
     grid = torch.stack(grid, -1)
     return grid

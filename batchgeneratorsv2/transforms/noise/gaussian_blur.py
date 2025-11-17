@@ -64,6 +64,7 @@ def blur_dimension(img: torch.Tensor, sigma: float, dim_to_blur: int, force_use_
 
     # Apply convolution
     # remember that weights are [c_out, c_in, ...]
+    kernel = kernel.to(img_padded.device)
     img_blurred = conv_op(img_padded[None], kernel.expand(img_padded.shape[0], *[-1] * (kernel.ndim - 1)), groups=img_padded.shape[0])[0]
     return img_blurred
 
