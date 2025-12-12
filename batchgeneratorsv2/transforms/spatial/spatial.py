@@ -72,14 +72,14 @@ class SpatialTransform(BasicTransform):
         do_deform = np.random.uniform() < self.p_elastic_deform
 
         if do_rotation:
-            angles = [sample_scalar(self.rotation, image=data_dict['image'], dim=i) for i in range(0, 3)]
+            angles = [sample_scalar(self.rotation, image=data_dict['image'], dim=i) for i in range(0, dim)]
         else:
             angles = [0] * dim
         if do_scale:
             if np.random.uniform() <= self.p_synchronize_scaling_across_axes:
                 scales = [sample_scalar(self.scaling, image=data_dict['image'], dim=None)] * dim
             else:
-                scales = [sample_scalar(self.scaling, image=data_dict['image'], dim=i) for i in range(0, 3)]
+                scales = [sample_scalar(self.scaling, image=data_dict['image'], dim=i) for i in range(0, dim)]
         else:
             scales = [1] * dim
 
@@ -145,7 +145,7 @@ class SpatialTransform(BasicTransform):
             center_location_in_pixels = [i / 2 for i in shape]
         else:
             center_location_in_pixels = []
-            for d in range(0, 3):
+            for d in range(0, dim):
                 mn = self.patch_center_dist_from_border[d]
                 mx = shape[d] - self.patch_center_dist_from_border[d]
                 if mx < mn:
