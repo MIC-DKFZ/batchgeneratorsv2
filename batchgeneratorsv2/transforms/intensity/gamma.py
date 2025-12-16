@@ -1,5 +1,4 @@
-from typing import Callable, Union
-
+from typing import Optional
 import torch
 
 from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
@@ -7,55 +6,103 @@ from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
 
 
 class GammaTransform(ImageOnlyTransform):
-    def __init__(self, gamma: RandomScalar, p_invert_image: float, synchronize_channels: bool, p_per_channel: float,
+    def __init__(self,
+                 gamma: RandomScalar,
+                 p_invert_image: float,
+                 synchronize_channels: bool,
+                 p_per_channel: float,
                  p_retain_stats: float):
         super().__init__()
         self.gamma = gamma
-        self.p_invert_image = p_invert_image
+        self.p_invert_image = float(p_invert_image)
         self.synchronize_channels = synchronize_channels
-        self.p_per_channel = p_per_channel
-        self.p_retain_stats = p_retain_stats
+        self.p_per_channel = float(p_per_channel)
+        self.p_retain_stats = float(p_retain_stats)
 
     def get_parameters(self, **data_dict) -> dict:
-        shape = data_dict['image'].shape
-        apply_to_channel = torch.where(torch.rand(shape[0]) < self.p_per_channel)[0]
-        retain_stats = torch.rand(len(apply_to_channel)) < self.p_retain_stats
-        invert_image = torch.rand(len(apply_to_channel)) < self.p_invert_image
+        img: torch.Tensor = data_dict["image"]
+        c = img.shape[0]
+        device = img.device
+        dtype = img.dtype
+
+        apply_idx = (torch.rand(c, device=device) < self.p_per_channel).nonzero(as_tuple=False).flatten()
+        n = apply_idx.numel()
+        if n == 0:
+            return {"apply_to_channel": apply_idx,
+                    "retain_stats": None,
+                    "invert_image": None,
+                    "gamma": None}
+
+        retain_stats = (torch.rand(n, device=device) < self.p_retain_stats)
+        invert_image = (torch.rand(n, device=device) < self.p_invert_image)
 
         if self.synchronize_channels:
-            gamma = torch.Tensor([sample_scalar(self.gamma, image=data_dict['image'], channel=None)] * len(apply_to_channel))
+            g = float(sample_scalar(self.gamma, image=img, channel=None))
+            gamma = torch.full((n,), g, device=device, dtype=dtype)
         else:
-            gamma = torch.Tensor([sample_scalar(self.gamma, image=data_dict['image'], channel=c) for c in apply_to_channel])
+            # sample_scalar is scalar-based; keep loop but avoid tensor scalar iteration
+            gs = [float(sample_scalar(self.gamma, image=img, channel=int(ch))) for ch in apply_idx.tolist()]
+            gamma = torch.as_tensor(gs, device=device, dtype=dtype)
+
         return {
-            'apply_to_channel': apply_to_channel,
-            'retain_stats': retain_stats,
-            'invert_image': invert_image,
-            'gamma': gamma
+            "apply_to_channel": apply_idx,
+            "retain_stats": retain_stats,
+            "invert_image": invert_image,
+            "gamma": gamma,
         }
 
     def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
-        for c, r, i, g in zip(params['apply_to_channel'], params['retain_stats'], params['invert_image'], params['gamma']):
-            if i:
-                img[c] *= -1
-            if r:
-                # std_mean is for whatever reason slower than doing the computations separately!?
-                # std, mean = torch.std_mean(img[c])
-                mean = torch.mean(img[c])
-                std = torch.std(img[c])
-            minm = torch.min(img[c])
-            rnge = torch.max(img[c]) - minm
-            img[c] = torch.pow(((img[c] - minm) / torch.clamp(rnge, min=1e-7)), g) * rnge + minm
-            if r:
-                # std_here, mn_here = torch.std_mean(img[c])
-                mn_here = torch.mean(img[c])
-                std_here = torch.std(img[c])
-                img[c] -= mn_here
-                img[c] *= (std / torch.clamp(std_here, min=1e-7))
-                img[c] += mean
+        idx: torch.Tensor = params["apply_to_channel"]
+        if idx.numel() == 0:
+            return img
 
-            if i:
-                img[c] *= -1
+        retain_stats: torch.Tensor = params["retain_stats"]
+        invert_image: torch.Tensor = params["invert_image"]
+        gamma: torch.Tensor = params["gamma"]
+
+        # constants
+        eps = 1e-7
+
+        # Loop over selected channels (good for small C)
+        for k in range(idx.numel()):
+            c = int(idx[k])
+            r = bool(retain_stats[k])
+            inv = bool(invert_image[k])
+            g = gamma[k]
+
+            x = img[c]
+
+            if inv:
+                x.mul_(-1)
+
+            if r:
+                mean = x.mean()
+                std = x.std()
+
+            minm = x.min()
+            maxm = x.max()
+            rnge = maxm - minm
+            denom = torch.clamp(rnge, min=eps)
+
+            # In-place gamma: x = (((x - min) / denom) ** g) * rnge + min
+            x.sub_(minm)
+            x.div_(denom)
+            x.pow_(g)
+            x.mul_(rnge)
+            x.add_(minm)
+
+            if r:
+                mn_here = x.mean()
+                std_here = x.std()
+                x.sub_(mn_here)
+                x.mul_(std / torch.clamp(std_here, min=eps))
+                x.add_(mean)
+
+            if inv:
+                x.mul_(-1)
+
         return img
+
 
 
 if __name__ == '__main__':

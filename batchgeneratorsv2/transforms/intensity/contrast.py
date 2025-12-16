@@ -26,44 +26,70 @@ class BGContrast():
         return self.__class__.__name__ + f"(contrast_range={self.contrast_range})"
 
 
+import torch
+from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
+from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
+
+
 class ContrastTransform(ImageOnlyTransform):
-    def __init__(self, contrast_range: RandomScalar, preserve_range: bool, synchronize_channels: bool, p_per_channel: float = 1):
+    def __init__(self, contrast_range: RandomScalar, preserve_range: bool, synchronize_channels: bool, p_per_channel: float = 1.0):
         super().__init__()
         self.contrast_range = contrast_range
         self.preserve_range = preserve_range
         self.synchronize_channels = synchronize_channels
-        self.p_per_channel = p_per_channel
+        self.p_per_channel = float(p_per_channel)
 
     def get_parameters(self, **data_dict) -> dict:
-        shape = data_dict['image'].shape
-        apply_to_channel = torch.where(torch.rand(shape[0]) < self.p_per_channel)[0]
-        if self.synchronize_channels:
-            multipliers = torch.Tensor([sample_scalar(self.contrast_range, image=data_dict['image'], channel=None)] * len(apply_to_channel))
+        img = data_dict["image"]
+        c = img.shape[0]
+
+        # sample on correct device
+        apply_idx = (torch.rand(c, device=img.device) < self.p_per_channel).nonzero(as_tuple=False).flatten()
+        n = apply_idx.numel()
+
+        if n == 0:
+            multipliers = None
+        elif self.synchronize_channels:
+            m = float(sample_scalar(self.contrast_range, image=img, channel=None))
+            multipliers = torch.full((n,), m, device=img.device, dtype=img.dtype)
         else:
-            multipliers = torch.Tensor([sample_scalar(self.contrast_range, image=data_dict['image'], channel=c) for c in apply_to_channel])
-        return {
-            'apply_to_channel': apply_to_channel,
-            'multipliers': multipliers
-        }
+            # Still a Python loop because sample_scalar is scalar-by-scalar
+            # Use .tolist() to avoid iterating tensor scalars in Python
+            ms = [sample_scalar(self.contrast_range, image=img, channel=int(ch)) for ch in apply_idx.tolist()]
+            multipliers = torch.as_tensor(ms, device=img.device, dtype=img.dtype)
+
+        return {"apply_to_channel": apply_idx, "multipliers": multipliers}
 
     def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
-        if len(params['apply_to_channel']) == 0:
+        idx = params["apply_to_channel"]
+        multipliers = params["multipliers"]
+        if multipliers is None or idx.numel() == 0:
             return img
-        # array notation is not faster, let's leave it like this
-        for i in range(len(params['apply_to_channel'])):
-            c = params['apply_to_channel'][i]
-            mean = img[c].mean()
-            if self.preserve_range:
-                minm = img[c].min()
-                maxm = img[c].max()
 
-            # this is faster than having it in one line because this circumvents reallocating memory
-            img[c] -= mean
-            img[c] *= params['multipliers'][i]
-            img[c] += mean
+        if self.preserve_range:
+            for i in range(idx.numel()):
+                c = int(idx[i])
+                m = multipliers[i]
 
-            if self.preserve_range:
-                img[c].clamp_(minm, maxm)
+                x = img[c]
+                mean = x.mean()
+                minm = x.min()
+                maxm = x.max()
+
+                x.sub_(mean)
+                x.mul_(m)
+                x.add_(mean)
+                x.clamp_(minm, maxm)
+        else:
+            for i in range(idx.numel()):
+                c = int(idx[i])
+                m = multipliers[i]
+
+                x = img[c]
+                mean = x.mean()
+                x.sub_(mean)
+                x.mul_(m)
+                x.add_(mean)
 
         return img
 

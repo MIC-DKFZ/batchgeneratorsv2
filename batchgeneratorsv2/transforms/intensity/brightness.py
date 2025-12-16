@@ -38,42 +38,58 @@ class BrightnessAdditiveTransform(ImageOnlyTransform):
     """
     Adds random additive brightness noise sampled from a Gaussian distribution (mu, sigma).
 
-    Supports per-channel brightness sampling or shared brightness across all channels.
+    Supports either synchronized brightness shift across all channels or per-channel brightness shift.
 
     Args:
         mu (float): Mean of the Gaussian used to sample brightness shifts.
         sigma (float): Standard deviation of the Gaussian.
-        per_channel (bool): If True, brightness shifts are sampled separately per channel.
+        synchronize_channels (bool): If True, brightness shifts are shared across all channels.
         p_per_channel (float): Probability to apply the brightness shift to each channel.
     """
 
     def __init__(self,
                  mu: float,
                  sigma: float,
-                 per_channel: bool = True,
+                 synchronize_channels: bool = True,  # Changed to synchronize_channels
                  p_per_channel: float = 1.0):
         super().__init__()
         self.mu = mu
         self.sigma = sigma
-        self.per_channel = per_channel
+        self.synchronize_channels = synchronize_channels  # Now it's being used
         self.p_per_channel = p_per_channel
 
-    def get_parameters(self, image: torch.Tensor, **kwargs) -> dict:
-        C = image.shape[0]
-        apply_channel = [np.random.rand() < self.p_per_channel for _ in range(C)]
+    def get_parameters(self, **data_dict) -> dict:
+        img = data_dict["image"]
+        c = img.shape[0]
+        apply_to_channel = (torch.rand(c, device=img.device) < self.p_per_channel).nonzero(as_tuple=False).flatten()
 
-        if self.per_channel:
-            brightness = [np.random.normal(self.mu, self.sigma) if apply else None for apply in apply_channel]
+        if len(apply_to_channel) == 0:
+            return {"apply_to_channel": apply_to_channel, "shift": None}
+
+        # Apply either synchronized or per-channel brightness shift
+        if self.synchronize_channels:
+            shift_value = float(sample_scalar((self.mu, self.sigma), image=img, channel=None))
+            shift = torch.full((c,), shift_value, device=img.device)
         else:
-            global_brightness = np.random.normal(self.mu, self.sigma)
-            brightness = [global_brightness if apply else None for apply in apply_channel]
+            shift = torch.stack([torch.normal(self.mu, self.sigma) for _ in range(c)], dim=0).to(img.device)
 
-        return {'brightness': brightness}
+        return {"apply_to_channel": apply_to_channel, "shift": shift}
 
     def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
-        for c, b in enumerate(params['brightness']):
-            if b is not None:
-                img[c].add_(float(b))
+        if params["shift"] is None:
+            return img
+
+        apply_idx = params["apply_to_channel"]
+        if apply_idx.numel() == 0:
+            return img
+
+        shift = params["shift"]
+        # Build full per-channel shift vector; non-selected channels get shift 0
+        shift_full = torch.zeros((img.shape[0],), device=img.device, dtype=img.dtype)
+        shift_full[apply_idx] = shift[apply_idx]
+
+        view_shape = (img.shape[0],) + (1,) * (img.ndim - 1)
+        img.add_(shift_full.view(view_shape))
         return img
 
 
@@ -84,7 +100,8 @@ if __name__ == '__main__':
     os.environ['OMP_NUM_THREADS'] = '1'
     torch.set_num_threads(1)
 
-    mbt = MultiplicativeBrightnessTransform((0.5, 2.), False, 1)
+    # mbt = BrightnessAdditiveTransform(0, 0.5,True, 1)
+    mbt = MultiplicativeBrightnessTransform((0.5, 2),False, 1)
 
     times_torch = []
     for _ in range(1000):

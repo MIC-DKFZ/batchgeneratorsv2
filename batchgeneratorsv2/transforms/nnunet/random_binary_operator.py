@@ -3,14 +3,11 @@ from typing import Union, List, Tuple, Callable
 
 import numpy as np
 import torch
-from fft_conv_pytorch import fft_conv
+from skimage.morphology import ball, disk
 
+from batchgeneratorsv2.helpers.fft_conv import fft_conv
 from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
-from skimage.morphology import ball, disk
-from skimage.morphology.binary import binary_erosion, binary_dilation, binary_closing, binary_opening
-
-import torch.nn.functional as F
 
 
 def binary_dilation_torch(input_tensor, structure_element):

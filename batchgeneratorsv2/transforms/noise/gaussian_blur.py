@@ -6,9 +6,9 @@ import torch
 from skimage.data import camera
 from torch.nn.functional import pad, conv3d, conv1d, conv2d
 
+from batchgeneratorsv2.helpers.fft_conv import fft_conv
 from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
-from fft_conv_pytorch import fft_conv
 
 
 def blur_dimension(img: torch.Tensor, sigma: float, dim_to_blur: int, force_use_fft: bool = None, truncate: float = 6):
@@ -219,7 +219,7 @@ if __name__ == "__main__":
     shape = (128, 164, 64)
     num_warmup_for_benchmark = 1
     num_repeats = 10
-    for sigma_range in (0.1, 1, 10):
+    for sigma_range in (0.1, 1, 10, 20):
         print(shape, sigma_range)
         gnt2 = GaussianBlurTransform(sigma_range, False, False, 1, benchmark=False)
         times = []

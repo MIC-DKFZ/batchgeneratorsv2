@@ -1,9 +1,8 @@
-import os
 from typing import Tuple
+import torch
 
 from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
-import torch
 
 
 class GaussianNoiseTransform(ImageOnlyTransform):
@@ -11,42 +10,66 @@ class GaussianNoiseTransform(ImageOnlyTransform):
                  noise_variance: RandomScalar = (0, 0.1),
                  p_per_channel: float = 1.,
                  synchronize_channels: bool = False):
+        super().__init__()
         self.noise_variance = noise_variance
         self.p_per_channel = p_per_channel
         self.synchronize_channels = synchronize_channels
-        super().__init__()
 
     def get_parameters(self, **data_dict) -> dict:
-        shape = data_dict['image'].shape
-        dct = {}
-        dct['apply_to_channel'] = torch.rand(shape[0]) < self.p_per_channel
-        dct['sigmas'] = \
-            [sample_scalar(self.noise_variance, data_dict['image'])
-             for i in range(sum(dct['apply_to_channel']))] if not self.synchronize_channels \
-                else sample_scalar(self.noise_variance, data_dict['image'])
-        return dct
+        img = data_dict["image"]
+        c = img.shape[0]
+
+        # bool mask on same device as image
+        apply = torch.rand(c, device=img.device) < self.p_per_channel
+
+        # store also count / indices to avoid recomputing later
+        idx = apply.nonzero(as_tuple=False).flatten()
+        n = idx.numel()
+
+        if n == 0:
+            sigmas = None
+        elif self.synchronize_channels:
+            sigmas = sample_scalar(self.noise_variance, img)
+        else:
+            # still uses sample_scalar, but avoids list->cat in _apply
+            # if sample_scalar is cheap, this is fine; otherwise see note below
+            sigmas = [sample_scalar(self.noise_variance, img) for _ in range(n)]
+
+        return {"apply_mask": apply, "apply_idx": idx, "num_apply": n, "sigmas": sigmas}
 
     def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
-        if sum(params['apply_to_channel']) == 0:
+        n = params["num_apply"]
+        if n == 0:
             return img
-        gaussian_noise = self._sample_gaussian_noise(img.shape, **params)
-        img[params['apply_to_channel']] += gaussian_noise
-        return img
 
-    def _sample_gaussian_noise(self, img_shape: Tuple[int, ...], **params):
-        if not isinstance(params['sigmas'], list):
-            num_channels = sum(params['apply_to_channel'])
-            # gaussian = torch.tile(torch.normal(0, params['sigmas'], size=(1, *img_shape[1:])),
-            #                       (num_channels, *[1]*(len(img_shape) - 1)))
-            gaussian = torch.normal(0, params['sigmas'], size=(1, *img_shape[1:]))
-            gaussian.expand((num_channels, *[-1]*(len(img_shape) - 1)))
+        idx = params["apply_idx"]
+        spatial = img.shape[1:]
+        device = img.device
+        dtype = img.dtype
+
+        sigmas = params["sigmas"]
+
+        if sigmas is None:
+            return img
+
+        # Create noise only for selected channels
+        if not self.synchronize_channels:
+            # vectorize per-channel sigma by creating a tensor of shape (n, 1, 1, ...)
+            # list->tensor is small (n floats), then broadcast
+            sigma_t = torch.as_tensor(sigmas, device=device, dtype=dtype)
+            view_shape = (n,) + (1,) * len(spatial)
+            sigma_t = sigma_t.view(view_shape)
+
+            noise = torch.empty((n, *spatial), device=device, dtype=dtype).normal_()
+            noise.mul_(sigma_t)
         else:
-            gaussian = [
-                torch.normal(0, i, size=(1, *img_shape[1:])) for i in params['sigmas']
-            ]
-            gaussian = torch.cat(gaussian, dim=0)
-        return gaussian
+            sigma = sigmas
+            noise = torch.empty((n, *spatial), device=device, dtype=dtype).normal_(mean=0.0, std=float(sigma))
 
+        # In-place add only on selected channels
+        img[idx].add_(noise)
+        return img
+    
 
 if __name__ == "__main__":
     from time import time
