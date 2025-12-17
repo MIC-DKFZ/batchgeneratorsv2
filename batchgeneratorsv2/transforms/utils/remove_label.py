@@ -5,7 +5,7 @@ import torch
 from batchgeneratorsv2.transforms.base.basic_transform import SegOnlyTransform
 
 
-class RemoveLabelTansform(SegOnlyTransform):
+class RemoveLabelTransform(SegOnlyTransform):
     def __init__(self, label_value: int, set_to: int, segmentation_channels: Union[int, Tuple[int, ...], List[int]] = None):
         if not isinstance(segmentation_channels, (list, tuple)) and segmentation_channels is not None:
             segmentation_channels = [segmentation_channels]
@@ -22,3 +22,6 @@ class RemoveLabelTansform(SegOnlyTransform):
         for s in channels:
             segmentation[s][segmentation[s] == self.label_value] = self.set_to
         return segmentation
+
+# uff.
+RemoveLabelTansform = RemoveLabelTransform
