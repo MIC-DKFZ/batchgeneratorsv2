@@ -94,8 +94,8 @@ def fft_conv(
             if stride != 1 or dilation != 1:
                 raise ValueError("stride must be 1 for padding='same'.")
             padding_ = [(k - 1) / 2 for k in kernel.shape[2:]]
-        else:
-            raise ValueError(f"Padding mode {padding} not supported.")
+        # else:
+        #     raise ValueError(f"Padding mode {padding} not supported.")
     else:
         padding_ = to_ntuple(padding, n=n)
 
