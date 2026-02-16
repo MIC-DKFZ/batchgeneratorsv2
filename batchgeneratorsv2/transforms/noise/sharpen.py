@@ -50,7 +50,7 @@ class SharpeningTransform(ImageOnlyTransform):
         }
 
     def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
-        out = img.clone()
+        out = img
         spatial_dims = img.dim() - 1  # 2 for (C, H, W), 3 for (C, D, H, W)
 
         if spatial_dims == 2:

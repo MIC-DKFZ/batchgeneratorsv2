@@ -71,7 +71,7 @@ class BlankRectangleTransform(ImageOnlyTransform):
         }
 
     def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
-        out = img.clone()
+        out = img
         for c, (apply, rects) in enumerate(zip(params['apply_channel'], params['rectangles'])):
             if not apply:
                 continue

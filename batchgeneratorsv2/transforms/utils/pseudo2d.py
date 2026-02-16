@@ -1,5 +1,3 @@
-from copy import deepcopy
-
 import torch
 
 from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
@@ -8,11 +6,11 @@ from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 class Convert3DTo2DTransform(BasicTransform):
     def apply(self, data_dict, **params):
         if 'image' in data_dict.keys():
-            data_dict['nchannels_img'] = deepcopy(data_dict['image']).shape[0]
+            data_dict['nchannels_img'] = data_dict['image'].shape[0]
         if 'segmentation' in data_dict.keys():
-            data_dict['nchannels_seg'] = deepcopy(data_dict['segmentation']).shape[0]
+            data_dict['nchannels_seg'] = data_dict['segmentation'].shape[0]
         if 'regression_target' in data_dict.keys():
-            data_dict['nchannels_regr_trg'] = deepcopy(data_dict['regression_target']).shape[0]
+            data_dict['nchannels_regr_trg'] = data_dict['regression_target'].shape[0]
         return super().apply(data_dict, **params)
 
     def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
