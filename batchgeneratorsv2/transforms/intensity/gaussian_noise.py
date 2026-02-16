@@ -66,8 +66,9 @@ class GaussianNoiseTransform(ImageOnlyTransform):
             sigma = sigmas
             noise = torch.empty((n, *spatial), device=device, dtype=dtype).normal_(mean=0.0, std=float(sigma))
 
-        # In-place add only on selected channels
-        img[idx].add_(noise)
+        # Advanced indexing (img[idx]) returns a copy, so use indexed assignment
+        # to make sure modifications are written back to img.
+        img[idx] += noise
         return img
     
 
