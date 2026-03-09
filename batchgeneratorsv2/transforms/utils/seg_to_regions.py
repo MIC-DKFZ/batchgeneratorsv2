@@ -5,7 +5,7 @@ from batchgeneratorsv2.transforms.base.basic_transform import SegOnlyTransform
 
 
 class ConvertSegmentationToRegionsTransform(SegOnlyTransform):
-    def __init__(self, regions: Union[List[int], Tuple[int, ...]], channel_in_seg: int = 0):
+    def __init__(self, regions: Union[List[Union[int, List[int]]], Tuple[Union[int, Tuple[int, ...]]]], channel_in_seg: int = 0):
         super().__init__()
         self.regions = [torch.Tensor(i) if not isinstance(i, int) else torch.Tensor([i]) for i in regions]
         self.channel_in_seg = channel_in_seg
