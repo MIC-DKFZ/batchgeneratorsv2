@@ -67,12 +67,11 @@ class CutOffOutliersTransform(ImageOnlyTransform):
             if retain_std[c]:
                 orig_std = img_c.std()
 
-            # Use numpy only to calculate percentiles
-            img_c_np = img_c.detach().cpu().numpy()
-            lower_val = np.percentile(img_c_np, perc[0])
-            upper_val = np.percentile(img_c_np, perc[1])
+            # Percentiles in torch to avoid numpy roundtrip
+            q = torch.tensor([perc[0] / 100.0, perc[1] / 100.0], device=img_c.device, dtype=torch.float32)
+            lower_val, upper_val = torch.quantile(img_c.float(), q)
 
-            img_c_clipped = img_c.clamp(min=float(lower_val), max=float(upper_val))
+            img_c_clipped = img_c.clamp(min=lower_val.item(), max=upper_val.item())
 
             if retain_std[c]:
                 clipped_std = img_c_clipped.std()

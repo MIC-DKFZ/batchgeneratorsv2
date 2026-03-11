@@ -1,6 +1,6 @@
 [project]
 name = "batchgeneratorsv2"
-version = "0.3.0"
+version = "0.3.1"
 requires-python = ">=3.9"
 description = "Batchgenerators but better"
 readme = "readme.md"
