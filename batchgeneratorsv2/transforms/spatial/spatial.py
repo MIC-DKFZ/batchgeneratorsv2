@@ -312,7 +312,50 @@ class SpatialTransform(BasicTransform):
         raise NotImplementedError
     
 
-class Misalign(BasicTransform):
+class ChannelMisalignmentTransform(BasicTransform):
+    """
+    The misalignment data augmentation is introduced in Nature Scientific reports 2023.
+    
+    Apply channel-wise misalignment to selected image channels.
+    This transform simulates registration errors between channels by randomly
+    applying one or more of the following operations to the specified image
+    channels:
+    - squeezing/scaling (good approximation for misalignments between the T2w and DWI MRI sequences)
+    - rotation
+    - translation via shifted crop center
+
+    If you use this augmentation please cite: https://www.nature.com/articles/s41598-023-46747-z
+
+    Parameters
+    ----------
+    im_channels_2_misalign : Tuple[int, ...]
+        Image channels to which the misalignment is applied.
+
+    squeezing_zyx : Tuple[float, ...], default=(0.1, 0, 0)
+        Maximum relative scaling deviation per axis in ZYX order.
+        For each active axis, the scale factor is sampled uniformly from [1 - s, 1 + s].
+
+    p_squeeze : float, default=0.0
+        Probability of applying squeezing/scaling.
+
+    rotation_ax_cor_sag : Tuple[float, ...], default=(np.pi, np.pi, np.pi)
+        Maximum absolute rotation angle per axis in axial/coronal/sagittal
+        order. Angles are sampled uniformly from [-a, a].
+
+    rad_or_deg : {"rad", "deg"}
+        Unit of `rotation_ax_cor_sag`.
+
+    p_rotation : float, default=0.0
+        Probability of applying rotation.
+
+    shift_zyx : Tuple[int, ...], default=(2, 32, 32)
+        Maximum integer shift per axis in ZYX order. For each axis, the shift
+        is sampled uniformly from [-s, s].
+
+    p_shift : float, default=0.0
+        Probability of applying translation.
+   
+    """
     def __init__(self,
                  im_channels_2_misalign: Tuple[int,] = [0, ],
 
@@ -471,18 +514,6 @@ class Misalign(BasicTransform):
                 img[ch, ...] = crop_tensor(img[ch, ...].unsqueeze(0), [math.floor(i) for i in params['center_location_in_pixels']], im_shape,
                                            pad_mode='constant', pad_kwargs={'value': 0})
             return img
-
-    def _apply_to_segmentation(self, segmentation: torch.Tensor, **params) -> torch.Tensor:
-        return segmentation.contiguous()
-
-    def _apply_to_regr_target(self, regression_target, **params) -> torch.Tensor:
-        return self._apply_to_image(regression_target, **params)
-
-    def _apply_to_keypoints(self, keypoints, **params):
-        raise NotImplementedError
-
-    def _apply_to_bbox(self, bbox, **params):
-        raise NotImplementedError
 
 
 def create_affine_matrix_3d(rotation_angles, scaling_factors):
