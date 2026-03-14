@@ -238,8 +238,6 @@ class SpatialTransform(BasicTransform):
             grid = None
 
         return {
-            'affine': affine,
-            'elastic_offsets': offsets,
             'center_location_in_pixels': center_location_in_pixels,
             'grid': grid,
         }
@@ -411,7 +409,6 @@ def _convert_my_grid_to_grid_sample_grid(my_grid: torch.Tensor, original_shape: 
     my_grid = torch.flip(my_grid, (len(my_grid.shape) - 1,))
     # my_grid = my_grid.flip((len(my_grid.shape) - 1,))
     return my_grid
-
 
 
 if __name__ == '__main__':
