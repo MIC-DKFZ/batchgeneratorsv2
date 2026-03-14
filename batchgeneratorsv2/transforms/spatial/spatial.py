@@ -163,14 +163,36 @@ class SpatialTransform(BasicTransform):
                     center_location_in_pixels.append(shape[d] / 2)
                 else:
                     center_location_in_pixels.append(np.random.uniform(mn, mx))
+        # Precompute the deformed grid once (shared by image, segmentation, regression target)
+        if affine is not None or offsets is not None:
+            grid = self._get_base_grid_clone()
+
+            # we deform first, then rotate
+            if offsets is not None:
+                grid += offsets
+            if affine is not None:
+                grid = torch.matmul(grid, torch.from_numpy(affine).float())
+
+            # we center the grid around the center_location_in_pixels. We should center the mean of the grid, not the center position
+            # only do this if we elastic deform
+            if self.center_deformation and offsets is not None:
+                mn = grid.mean(dim=list(range(len(shape))))
+            else:
+                mn = 0
+
+            new_center = torch.Tensor([c - s / 2 for c, s in zip(center_location_in_pixels, shape)])
+            grid += (new_center - mn)
+            grid = _convert_my_grid_to_grid_sample_grid(grid, shape)
+        else:
+            grid = None
+
         return {
-            'affine': affine,
-            'elastic_offsets': offsets,
-            'center_location_in_pixels': center_location_in_pixels
+            'center_location_in_pixels': center_location_in_pixels,
+            'grid': grid,
         }
 
     def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
-        if params['affine'] is None and params['elastic_offsets'] is None:
+        if params['grid'] is None:
             # No spatial transformation is being done. Round grid_center and crop without having to interpolate.
             # This saves compute.
             # cropping requires the center to be given as integer coordinates
@@ -193,30 +215,12 @@ class SpatialTransform(BasicTransform):
                               pad_kwargs=pad_kwargs)
             return img
         else:
-            grid = self._get_base_grid_clone()
-
-            # we deform first, then rotate
-            if params['elastic_offsets'] is not None:
-                grid += params['elastic_offsets']
-            if params['affine'] is not None:
-                grid = torch.matmul(grid, torch.from_numpy(params['affine']).float())
-
-            # we center the grid around the center_location_in_pixels. We should center the mean of the grid, not the center position
-            # only do this if we elastic deform
-            if self.center_deformation and params['elastic_offsets'] is not None:
-                mn = grid.mean(dim=list(range(img.ndim - 1)))
-            else:
-                mn = 0
-
-            new_center = torch.Tensor([c - s / 2 for c, s in zip(params['center_location_in_pixels'], img.shape[1:])])
-            grid += (new_center - mn)
-            # print(f'grid sample with pad mode {self.padding_mode_image}')
-            return grid_sample(img[None], _convert_my_grid_to_grid_sample_grid(grid, img.shape[1:])[None],
+            return grid_sample(img[None], params['grid'][None],
                                mode='bilinear', padding_mode=self.padding_mode_image, align_corners=False)[0]
 
     def _apply_to_segmentation(self, segmentation: torch.Tensor, **params) -> torch.Tensor:
         segmentation = segmentation.contiguous()
-        if params['affine'] is None and params['elastic_offsets'] is None:
+        if params['grid'] is None:
             # No spatial transformation is being done. Round grid_center and crop without having to interpolate.
             # This saves compute.
             # cropping requires the center to be given as integer coordinates
@@ -227,25 +231,7 @@ class SpatialTransform(BasicTransform):
                                        pad_kwargs={'value': 0})
             return segmentation
         else:
-            grid = self._get_base_grid_clone()
-
-            # we deform first, then rotate
-            if params['elastic_offsets'] is not None:
-                grid += params['elastic_offsets']
-            if params['affine'] is not None:
-                grid = torch.matmul(grid, torch.from_numpy(params['affine']).float())
-
-            # we center the grid around the center_location_in_pixels. We should center the mean of the grid, not the center coordinate
-            if self.center_deformation and params['elastic_offsets'] is not None:
-                mn = grid.mean(dim=list(range(segmentation.ndim - 1)))
-            else:
-                mn = 0
-
-            new_center = torch.Tensor(
-                [c - s / 2 for c, s in zip(params['center_location_in_pixels'], segmentation.shape[1:])])
-
-            grid += (new_center - mn)
-            grid = _convert_my_grid_to_grid_sample_grid(grid, segmentation.shape[1:])
+            grid = params['grid']
 
             if self.mode_seg == 'nearest':
                 result_seg = grid_sample(
@@ -362,7 +348,6 @@ def _convert_my_grid_to_grid_sample_grid(my_grid: torch.Tensor, original_shape: 
     my_grid = torch.flip(my_grid, (len(my_grid.shape) - 1,))
     # my_grid = my_grid.flip((len(my_grid.shape) - 1,))
     return my_grid
-
 
 
 if __name__ == '__main__':
