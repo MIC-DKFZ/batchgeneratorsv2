@@ -240,6 +240,9 @@ class SpatialTransform(BasicTransform):
         return {
             'center_location_in_pixels': center_location_in_pixels,
             'grid': grid,
+            # we don't need them but we keep them so that we can debug better
+            'affine': affine,
+            'elastic_offsets': offsets,
         }
 
     def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
