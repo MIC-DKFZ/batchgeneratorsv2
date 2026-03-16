@@ -27,6 +27,7 @@ class SpatialTransform(BasicTransform):
                  p_synchronize_def_scale_across_axes: float = 0,
                  p_rotation: float = 0,
                  rotation: RandomScalar = (0, 2 * np.pi),
+                 p_rot_per_axis: float = 1,
                  p_scaling: float = 0,
                  scaling: RandomScalar = (0.7, 1.3),
                  p_synchronize_scaling_across_axes: float = 0,
@@ -54,6 +55,7 @@ class SpatialTransform(BasicTransform):
         self.elastic_deform_magnitude = elastic_deform_magnitude  # determines the maximum displacement, measured in pixels!!
         self.p_rotation = p_rotation
         self.rotation = rotation
+        self.p_rot_per_axis = p_rot_per_axis
         self.p_scaling = p_scaling
         self.scaling = scaling  # larger numbers = smaller objects!
         self.p_synchronize_scaling_across_axes = p_synchronize_scaling_across_axes
@@ -82,6 +84,10 @@ class SpatialTransform(BasicTransform):
 
         if do_rotation:
             angles = [sample_scalar(self.rotation, image=data_dict['image'], dim=i) for i in range(0, dim)]
+            if self.p_rot_per_axis < 1:
+                for i in range(dim):
+                    if np.random.uniform() > self.p_rot_per_axis:
+                        angles[i] = 0
         else:
             angles = [0] * dim
         if do_scale:
