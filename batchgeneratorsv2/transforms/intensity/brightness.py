@@ -71,7 +71,7 @@ class BrightnessAdditiveTransform(ImageOnlyTransform):
             shift_value = float(sample_scalar((self.mu, self.sigma), image=img, channel=None))
             shift = torch.full((c,), shift_value, device=img.device)
         else:
-            shift = torch.stack([torch.normal(self.mu, self.sigma) for _ in range(c)], dim=0).to(img.device)
+            shift = torch.empty(c, device=img.device).normal_(float(self.mu), float(self.sigma))
 
         return {"apply_to_channel": apply_to_channel, "shift": shift}
 
