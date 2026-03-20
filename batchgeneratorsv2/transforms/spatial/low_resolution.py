@@ -45,7 +45,7 @@ class SimulateLowResolutionTransform(ImageOnlyTransform):
                 scales = torch.Tensor([[sample_scalar(self.scale, image=data_dict['image'], channel=c, dim=None)]  * (len(shape) - 1) for c in apply_to_channel])
             else:
                 scales = torch.Tensor([[sample_scalar(self.scale, image=data_dict['image'], channel=c, dim=d) for d in range(len(shape) - 1)] for c in apply_to_channel])
-        if len(scales) > 0:
+        if len(scales) > 0 and not self.ignore_axes is None:
             scales[:, self.ignore_axes] = 1
         return {
             'apply_to_channel': apply_to_channel,
