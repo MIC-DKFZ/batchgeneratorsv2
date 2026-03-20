@@ -15,7 +15,10 @@ class MaskImageTransform(BasicTransform):
         self.set_outside_to = set_outside_to
 
     def apply(self, data_dict, **params):
+        if len(self.apply_to_channels) == 0:
+            return data_dict
         mask = data_dict['segmentation'][self.channel_idx_in_seg] < 0
-        data_dict['image'][:, mask] = self.set_outside_to
+        for a in self.apply_to_channels:
+            data_dict['image'][a, mask] = self.set_outside_to
         return data_dict
 
