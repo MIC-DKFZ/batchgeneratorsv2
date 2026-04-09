@@ -113,3 +113,5 @@ ENV/
 
 *.model
 
+CLAUDE.md
+AGENTS.md
