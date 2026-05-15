@@ -37,10 +37,13 @@ class OneOfTransform(BasicTransform):
         list_of_transforms (List[BasicTransform]): A list of transform instances to choose from.
     """
 
-    def __init__(self, list_of_transforms: List[BasicTransform]):
+    def __init__(self, list_of_transforms: List[BasicTransform], list_of_probabilities: List[float] = None):
         super().__init__()
         self.list_of_transforms = list_of_transforms
+        if list_of_probabilities is not None:
+            assert len(list_of_transforms) == len(list_of_probabilities), "Would expect list_of_transforms and probabilities to have the same length..."
+        self.probabilities = list_of_probabilities
 
     def __call__(self, **data_dict) -> dict:
-        chosen_transform = np.random.choice(self.list_of_transforms)
+        chosen_transform = np.random.choice(self.list_of_transforms, p=self.probabilities)
         return chosen_transform(**data_dict)
