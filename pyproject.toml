@@ -33,7 +33,8 @@ dependencies = [
     "torch>=2.0.0",
     "numpy",
     "fft-conv-pytorch",
-    "batchgenerators>=0.25"
+    "batchgenerators>=0.25",
+    "flm@git+https://github.com/NeuroADaS-Lab/FLM.git"
 ]
 
 #[project.urls]
