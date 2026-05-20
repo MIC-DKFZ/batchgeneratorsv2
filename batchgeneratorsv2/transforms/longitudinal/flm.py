@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from scipy import ndimage as nd
 
-import flm as _flm
+from fake_lesion_mask import fake_lesion_mask, OPTIONS
 
 from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 
@@ -11,7 +11,7 @@ from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 class FakeLesionMask(BasicTransform):
 
     def __init__(self,
-                 params: list = _flm.OPTIONS,
+                 params: list = OPTIONS,
                  target_class: int = 1,
                  regions_where_class_cannot_be: Sequence[int] = None
                  ):
@@ -40,7 +40,7 @@ class FakeLesionMask(BasicTransform):
         flm_params = params['flm_params']
         seg_as_numpy = seg.squeeze(0).numpy().copy() # segs are stored and read as 1, H, W, D
         lesion_mask = seg_as_numpy == self.target_class
-        augmented_lesion_mask = _flm.fake_lesion_mask(lesion_mask, params=flm_params, structure=self.structure)
+        augmented_lesion_mask = fake_lesion_mask(lesion_mask, params=flm_params, structure=self.structure)
         augmented_lesion_mask &= ~self.get_where_target_class_cannot_be(seg_as_numpy)
         img[-1] = torch.from_numpy(augmented_lesion_mask).to(img.dtype)
         return img
