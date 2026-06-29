@@ -140,6 +140,10 @@ class BrightnessGradientAdditiveTransform(ImageOnlyTransform, LocalTransform):
         return {'kernels': kernels}
 
     def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
+        if self.clip_intensities:
+            original_min = img.min()
+            original_max = img.max()
+
         for c, kernel in enumerate(params['kernels']):
             if kernel is None:
                 continue
@@ -147,7 +151,7 @@ class BrightnessGradientAdditiveTransform(ImageOnlyTransform, LocalTransform):
             img[c].add_(kernel_tensor)
 
         if self.clip_intensities:
-            img.clamp_(min=img.min(), max=img.max())
+            img.clamp_(min=original_min, max=original_max)
 
         return img
 
