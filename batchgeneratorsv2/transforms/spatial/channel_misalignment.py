@@ -201,7 +201,10 @@ class ChannelMisalignmentTransform(ImageOnlyTransform):
             if params['elastic_offsets'] is not None:
                 grid += params['elastic_offsets']
             if params['affine'] is not None:
-                grid = torch.matmul(grid, torch.from_numpy(params['affine']).float())
+                # grid stores spatial vectors as row vectors (shape [..., dim]), whereas affine is built to act on
+                # column vectors (x' = affine @ x). We therefore multiply by affine.T so that each grid point is
+                # transformed by affine rather than its transpose (see issue #24).
+                grid = torch.matmul(grid, torch.from_numpy(params['affine'].T).float())
 
             # we center the grid around the center_location_in_pixels. We should center the mean of the grid, not the center position
             # only do this if we elastic deform
