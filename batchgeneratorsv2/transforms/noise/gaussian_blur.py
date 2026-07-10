@@ -122,22 +122,28 @@ class GaussianBlurTransform(ImageOnlyTransform):
         # print(params['sigmas'])
         if self.synchronize_channels:
             # we can compute that in one go as the conv implementation supports arbitrary input channels (with expanded kernel)
+            # Gather the selected channels once (advanced indexing copies), chain the per-dim blurs, scatter back once.
+            # blur_dimension never mutates its input, so this is the same composition as writing back each dim.
+            mask = params['apply_to_channel']
+            sub = img[mask]
             for d in range(dim):
-                # print(d, params['sigmas'][d])
                 if not self.benchmark:
-                    img[params['apply_to_channel']] = blur_dimension(img[params['apply_to_channel']], params['sigmas'][d], d)
+                    sub = blur_dimension(sub, params['sigmas'][d], d)
                 else:
-                    img[params['apply_to_channel']] = self._benchmark_wrapper(img[params['apply_to_channel']], params['sigmas'][d], d)
+                    sub = self._benchmark_wrapper(sub, params['sigmas'][d], d)
+            img[mask] = sub
         else:
             # we have to go through all the channels, build the kernel for each channel etc
             idx = np.where(params['apply_to_channel'])[0]
             for j, i in enumerate(idx):
+                sub = img[i:i+1]  # view for the first read; blur_dimension returns fresh tensors thereafter
                 for d in range(dim):
                     # print(i, d, params['sigmas'][i][d])
                     if not self.benchmark:
-                        img[i:i+1] = blur_dimension(img[i:i+1], params['sigmas'][j][d], d)
+                        sub = blur_dimension(sub, params['sigmas'][j][d], d)
                     else:
-                        img[i:i+1] = self._benchmark_wrapper(img[i:i+1], params['sigmas'][j][d], d)
+                        sub = self._benchmark_wrapper(sub, params['sigmas'][j][d], d)
+                img[i:i+1] = sub
         return img
 
     def _benchmark_wrapper(self, img: torch.Tensor, sigma: float, dim_to_blur: int):

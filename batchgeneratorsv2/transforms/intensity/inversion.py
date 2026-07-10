@@ -31,10 +31,11 @@ class InvertImageTransform(ImageOnlyTransform):
             return img
         else:
             for ch in params['apply_to_channel']:
-                mn = img[ch].mean()
-                img[ch] -= mn
-                img[ch] *= -1
-                img[ch] += mn
+                x = img[ch]  # channel view; operate in place to drop the per-op __setitem__ write-backs
+                mn = x.mean()
+                x.sub_(mn)
+                x.mul_(-1)
+                x.add_(mn)
         return img
 
 

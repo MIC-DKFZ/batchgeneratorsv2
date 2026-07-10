@@ -73,8 +73,7 @@ class ContrastTransform(ImageOnlyTransform):
 
                 x = img[c]
                 mean = x.mean()
-                minm = x.min()
-                maxm = x.max()
+                minm, maxm = torch.aminmax(x)  # single reduction pass instead of separate min()/max()
 
                 x.sub_(mean)
                 x.mul_(m)

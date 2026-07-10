@@ -40,7 +40,7 @@ class LocalContrastTransform(ImageOnlyTransform, LocalTransform):
             return {'kernels': [None] * C, 'contrasts': [None] * C}
 
         if self.same_for_all_channels:
-            kernel = self._generate_kernel(spatial).astype(np.float32)
+            kernel = self._generate_kernel(spatial)  # already float32; .astype(np.float32) was a redundant full copy
             contrast = sample_scalar(self.new_contrast)
 
             kernels = [kernel if apply else None for apply in apply_channel]
@@ -52,7 +52,7 @@ class LocalContrastTransform(ImageOnlyTransform, LocalTransform):
                     kernels.append(None)
                     contrasts.append(None)
                     continue
-                kernel = self._generate_kernel(spatial).astype(np.float32)
+                kernel = self._generate_kernel(spatial)  # already float32; .astype(np.float32) was a redundant full copy
                 contrast = sample_scalar(self.new_contrast)
                 kernels.append(kernel)
                 contrasts.append(contrast)
@@ -67,9 +67,17 @@ class LocalContrastTransform(ImageOnlyTransform, LocalTransform):
                 continue
 
             channel = img_np[c]
-            mean = (channel * kernel).sum() / (kernel.sum() + 1e-8)
-            modified = (channel - mean) * contrast + mean
-            img_np[c] = self.run_interpolation(channel, modified, kernel)
+            mean = (channel * kernel).sum() / (kernel.sum() + 1e-8)  # keep exact summation order
+            modified = channel - mean          # fresh owned array
+            modified *= contrast
+            modified += mean                   # (channel - mean) * contrast + mean
+            # Blend in place: channel*(1-kernel) + modified*kernel, without extra temps. `channel` is read into
+            # tmp before img_np[c] is overwritten. Only IEEE-commutative operand swaps -> bit-identical.
+            tmp = 1.0 - kernel
+            tmp *= channel                     # channel * (1 - kernel)
+            modified *= kernel                 # modified * kernel
+            modified += tmp
+            img_np[c] = modified
 
         return torch.from_numpy(img_np).to(img.device, dtype=img.dtype)
 

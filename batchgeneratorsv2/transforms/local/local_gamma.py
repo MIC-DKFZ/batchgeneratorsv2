@@ -42,7 +42,7 @@ class LocalGammaTransform(ImageOnlyTransform, LocalTransform):
             return {'kernels': [None] * C, 'gammas': [None] * C}
 
         if self.same_for_all_channels:
-            kernel = self._generate_kernel(spatial).astype(np.float32)
+            kernel = self._generate_kernel(spatial)  # already float32; .astype(np.float32) was a redundant full copy
             gamma = sample_scalar(self.gamma)
 
             kernels = [kernel if apply else None for apply in apply_channel]
@@ -54,7 +54,7 @@ class LocalGammaTransform(ImageOnlyTransform, LocalTransform):
                     kernels.append(None)
                     gammas.append(None)
                     continue
-                kernel = self._generate_kernel(spatial).astype(np.float32)
+                kernel = self._generate_kernel(spatial)  # already float32; .astype(np.float32) was a redundant full copy
                 gamma = sample_scalar(self.gamma)
                 kernels.append(kernel)
                 gammas.append(gamma)
@@ -72,15 +72,20 @@ class LocalGammaTransform(ImageOnlyTransform, LocalTransform):
             min_val, max_val = channel.min(), channel.max()
             denom = max(max_val - min_val, 1e-8)
 
-            # Normalize to [0, 1]
-            norm = (channel - min_val) / denom
+            # Normalize to [0, 1] (norm is a fresh owned array; channel/kernel are never mutated)
+            norm = channel - min_val
+            norm /= denom
             gamma_corrected = np.power(norm, gamma)
 
-            # Blend using kernel
-            blended = self.run_interpolation(norm, gamma_corrected, kernel)
-
-            # Rescale to original range
-            img_np[c] = blended * denom + min_val
+            # Blend in place: run_interpolation(norm, gc, k) == norm*(1-k) + gc*k, reassembled without extra temps.
+            # Uses only IEEE-commutative operand swaps of individual * and + (no reassociation), so bit-identical.
+            tmp = 1.0 - kernel
+            tmp *= norm                 # norm * (1 - kernel)
+            gamma_corrected *= kernel   # gamma_corrected * kernel
+            gamma_corrected += tmp      # blended
+            gamma_corrected *= denom    # rescale to original range
+            gamma_corrected += min_val
+            img_np[c] = gamma_corrected
 
         return torch.from_numpy(img_np).to(img.device, dtype=img.dtype)
 

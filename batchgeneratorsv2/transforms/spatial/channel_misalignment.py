@@ -206,22 +206,21 @@ class ChannelMisalignmentTransform(ImageOnlyTransform):
                 # transformed by affine rather than its transpose (see issue #24).
                 grid = torch.matmul(grid, torch.from_numpy(params['affine'].T).float())
 
-            # we center the grid around the center_location_in_pixels. We should center the mean of the grid, not the center position
-            # only do this if we elastic deform
+            # we center the grid around the center_location_in_pixels. We should center the mean of the grid, not the
+            # center position. This is only meaningful when we elastic deform; new_center is all-zeros, so in the
+            # non-deform case `grid += (0 - 0)` is a wasted full-grid pass (x + 0.0 == x) and is skipped.
             if params['elastic_offsets'] is not None:
                 mn = grid.mean(dim=list(range(img.ndim - 1)))
-            else:
-                mn = 0
-
-            # new_center = torch.Tensor([c - s / 2 for c, s in zip(params['center_location_in_pixels'], img.shape[1:])])
-            new_center = torch.Tensor([0, 0, 0])
-            grid += (new_center - mn)
+                # new_center = torch.Tensor([c - s / 2 for c, s in zip(params['center_location_in_pixels'], img.shape[1:])])
+                new_center = torch.Tensor([0, 0, 0])
+                grid += (new_center - mn)
 
             for ch in self.im_channels_2_misalign:
-                img[ch, ...] = grid_sample(img[ch, ...].unsqueeze(0).unsqueeze(0),
-                                           _convert_my_grid_to_grid_sample_grid(grid, img.shape[1:])[None],
-                                           mode='bilinear', padding_mode="zeros", align_corners=False)[0]
-                img[ch, ...] = crop_tensor(img[ch, ...].unsqueeze(0),
+                # crop the grid_sample result directly instead of writing it into img[ch] and reading it back
+                resampled = grid_sample(img[ch, ...].unsqueeze(0).unsqueeze(0),
+                                        _convert_my_grid_to_grid_sample_grid(grid, img.shape[1:])[None],
+                                        mode='bilinear', padding_mode="zeros", align_corners=False)[0]
+                img[ch, ...] = crop_tensor(resampled,
                                            [math.floor(i) for i in params['center_location_in_pixels']], im_shape,
                                            pad_mode='constant', pad_kwargs={'value': 0})
             return img

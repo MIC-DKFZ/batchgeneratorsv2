@@ -63,22 +63,22 @@ class CutOffOutliersTransform(ImageOnlyTransform):
             if perc is None:
                 continue
 
-            img_c = img[c]
+            img_c = img[c]  # channel view
             if retain_std[c]:
                 orig_std = img_c.std()
 
-            # Percentiles in torch to avoid numpy roundtrip
+            # Percentiles in torch to avoid numpy roundtrip (computed on the pre-clamp values, as before)
             q = torch.tensor([perc[0] / 100.0, perc[1] / 100.0], device=img_c.device, dtype=torch.float32)
             lower_val, upper_val = torch.quantile(img_c.float(), q)
 
-            img_c_clipped = img_c.clamp(min=lower_val.item(), max=upper_val.item())
+            # Clamp in place on the view: drops the clamp() copy and, in the non-rescale path, the img[c]=... write-back.
+            img_c.clamp_(min=lower_val.item(), max=upper_val.item())
 
             if retain_std[c]:
-                clipped_std = img_c_clipped.std()
+                clipped_std = img_c.std()
                 if clipped_std > 1e-8:
-                    img_c_clipped = (img_c_clipped - img_c_clipped.mean()) / clipped_std * orig_std + img_c_clipped.mean()
-
-            img[c] = img_c_clipped
+                    m = img_c.mean()  # cache: was computed twice
+                    img[c] = (img_c - m) / clipped_std * orig_std + m
 
         return img
 

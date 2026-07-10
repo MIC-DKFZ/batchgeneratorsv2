@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from typing import Tuple
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
@@ -25,19 +26,21 @@ class RicianNoiseTransform(ImageOnlyTransform):
         noise_imag = torch.empty_like(img).normal_(mean=0.0, std=var)
 
         min_val = img.min()
-        shifted = img - min_val
+        shifted = img - min_val  # fresh owned buffer (img itself is never mutated below)
 
-        rician = torch.sqrt((shifted + noise_real).pow_(2).add_(noise_imag.pow_(2)))
-        rician = rician + min_val
+        # Run the whole Rician pipeline in `shifted`'s buffer. Same elementwise ops in the same order as
+        # sqrt((shifted+noise_real)^2 + noise_imag^2) + min_val, just in place -> bit-identical.
+        rician = shifted.add_(noise_real).pow_(2).add_(noise_imag.pow_(2)).sqrt_()
+        rician.add_(min_val)
 
-        # Normalize to match original mean and std
+        # Normalize to match original mean and std (scalars captured before the in-place normalization)
         input_mean, input_std = img.mean(), img.std()
         rician_mean, rician_std = rician.mean(), rician.std()
 
         if rician_std > 0:
-            rician = (rician - rician_mean) / rician_std * input_std + input_mean
+            rician.sub_(rician_mean).div_(rician_std).mul_(input_std).add_(input_mean)
         else:
-            rician = rician * 0 + input_mean  # fallback if std is zero (flat image)
+            rician.mul_(0).add_(input_mean)  # keep mul_(0) (not fill_) so inf/nan propagate as before
 
         return rician
 

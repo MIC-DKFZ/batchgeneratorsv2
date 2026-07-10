@@ -79,8 +79,7 @@ class GammaTransform(ImageOnlyTransform):
                 mean = x.mean()
                 std = x.std()
 
-            minm = x.min()
-            maxm = x.max()
+            minm, maxm = torch.aminmax(x)  # single reduction pass instead of separate min()/max()
             rnge = maxm - minm
             denom = torch.clamp(rnge, min=eps)
 

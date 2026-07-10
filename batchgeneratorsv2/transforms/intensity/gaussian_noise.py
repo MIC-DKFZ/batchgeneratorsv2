@@ -66,9 +66,10 @@ class GaussianNoiseTransform(ImageOnlyTransform):
             sigma = sigmas
             noise = torch.empty((n, *spatial), device=device, dtype=dtype).normal_(mean=0.0, std=float(sigma))
 
-        # Advanced indexing (img[idx]) returns a copy, so use indexed assignment
-        # to make sure modifications are written back to img.
-        img[idx] += noise
+        # index_add_ adds noise[i] into channel img[idx[i]] fully in place. idx is unique (from nonzero),
+        # so there is no accumulation ambiguity. This avoids the full (n, *spatial) gather copy + scatter that
+        # advanced-indexed `img[idx] += noise` would allocate.
+        img.index_add_(0, idx, noise)
         return img
     
 

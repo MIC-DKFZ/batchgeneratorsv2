@@ -30,7 +30,7 @@ class MultiplicativeBrightnessTransform(ImageOnlyTransform):
         # even though this is array notation it's a lot slower. Shame shame
         # img[params['apply_to_channel']] *= params['multipliers'].view(-1, *[1]*(img.ndim - 1))
         for c, m in zip(params['apply_to_channel'], params['multipliers']):
-            img[c] *= m
+            img[c].mul_(m)  # in-place on the channel view; avoids the __setitem__ write-back copy of `img[c] *= m`
         return img
 
 

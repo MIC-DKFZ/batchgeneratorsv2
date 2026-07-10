@@ -12,6 +12,8 @@ class DownsampleSegForDSTransform(SegOnlyTransform):
 
     def _apply_to_segmentation(self, segmentation: torch.Tensor, **params) -> List[torch.Tensor]:
         results = []
+        dtype = segmentation.dtype
+        seg_float = None  # full-res float copy, built once and shared across scales (interpolate only reads it)
         for s in self.ds_scales:
             if not isinstance(s, (tuple, list)):
                 s = [s] * (segmentation.ndim - 1)
@@ -22,9 +24,10 @@ class DownsampleSegForDSTransform(SegOnlyTransform):
                 results.append(segmentation)
             else:
                 new_shape = [round(i * j) for i, j in zip(segmentation.shape[1:], s)]
-                dtype = segmentation.dtype
                 # interpolate is not defined for short etc
-                results.append(interpolate(segmentation[None].float(), new_shape, mode='nearest-exact')[0].to(dtype))
+                if seg_float is None:
+                    seg_float = segmentation[None].float()
+                results.append(interpolate(seg_float, new_shape, mode='nearest-exact')[0].to(dtype))
         return results
 
 
