@@ -42,7 +42,7 @@ class LocalGammaTransform(ImageOnlyTransform, LocalTransform):
             return {'kernels': [None] * C, 'gammas': [None] * C}
 
         if self.same_for_all_channels:
-            kernel = self._generate_kernel(spatial)  # already float32; .astype(np.float32) was a redundant full copy
+            kernel = self._generate_kernel(spatial)
             gamma = sample_scalar(self.gamma)
 
             kernels = [kernel if apply else None for apply in apply_channel]
@@ -54,7 +54,7 @@ class LocalGammaTransform(ImageOnlyTransform, LocalTransform):
                     kernels.append(None)
                     gammas.append(None)
                     continue
-                kernel = self._generate_kernel(spatial)  # already float32; .astype(np.float32) was a redundant full copy
+                kernel = self._generate_kernel(spatial)
                 gamma = sample_scalar(self.gamma)
                 kernels.append(kernel)
                 gammas.append(gamma)
@@ -77,15 +77,10 @@ class LocalGammaTransform(ImageOnlyTransform, LocalTransform):
             norm /= denom
             gamma_corrected = np.power(norm, gamma)
 
-            # Blend in place: run_interpolation(norm, gc, k) == norm*(1-k) + gc*k, reassembled without extra temps.
-            # Uses only IEEE-commutative operand swaps of individual * and + (no reassociation), so bit-identical.
-            tmp = 1.0 - kernel
-            tmp *= norm                 # norm * (1 - kernel)
-            gamma_corrected *= kernel   # gamma_corrected * kernel
-            gamma_corrected += tmp      # blended
-            gamma_corrected *= denom    # rescale to original range
-            gamma_corrected += min_val
-            img_np[c] = gamma_corrected
+            blended = self.run_interpolation_inplace(norm, gamma_corrected, kernel)
+            blended *= denom            # rescale to original range
+            blended += min_val
+            img_np[c] = blended
 
         return torch.from_numpy(img_np).to(img.device, dtype=img.dtype)
 

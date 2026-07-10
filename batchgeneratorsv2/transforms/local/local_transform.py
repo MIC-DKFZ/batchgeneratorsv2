@@ -11,6 +11,9 @@ class LocalTransform(ABC):
         self.scale = scale
 
     def _generate_kernel(self, img_shp: Tuple[int, ...]) -> np.ndarray:
+        """
+        Always returns a float32 array in [0, 1]; callers rely on this and do not re-cast.
+        """
         ndim = len(img_shp)
         x_grids = [np.arange(-0.5, s + 0.5, dtype=np.float32) for s in img_shp]
         kernels = []
@@ -75,6 +78,8 @@ class LocalTransform(ABC):
         """
         Blends original and modified images using the given kernel as a per-pixel weight map.
 
+        Reference implementation; prefer run_interpolation_inplace in per-sample code paths.
+
         Parameters:
             original_image (np.ndarray): Unmodified input image
             modified_image (np.ndarray): Modified version (e.g., gamma-corrected)
@@ -84,3 +89,24 @@ class LocalTransform(ABC):
             np.ndarray: Blended result
         """
         return original_image * (1.0 - kernel_image) + modified_image * kernel_image
+
+    @staticmethod
+    def run_interpolation_inplace(original_image: np.ndarray,
+                                  modified_image: np.ndarray,
+                                  kernel_image: np.ndarray) -> np.ndarray:
+        """
+        Same blend as run_interpolation, computed into modified_image's buffer with a single extra
+        temporary. Uses the identical individual * and + ops with only IEEE-commutative operand swaps
+        (no reassociation), so the result is bit-identical to run_interpolation.
+
+        Contract: modified_image must be a fresh buffer owned by the caller (it is overwritten);
+        original_image and kernel_image are only read. original_image may alias the eventual output
+        slot as long as that slot is written only after this call returns.
+
+        Returns modified_image (now holding the blended result).
+        """
+        tmp = 1.0 - kernel_image
+        tmp *= original_image       # original * (1 - kernel)
+        modified_image *= kernel_image
+        modified_image += tmp
+        return modified_image

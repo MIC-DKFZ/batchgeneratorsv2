@@ -25,9 +25,11 @@ class MoveSegAsOneHotToDataTransform(BasicTransform):
         img = data_dict['image']
         C = img.shape[0]
         # Allocate the concatenated result once and write the one-hot channels straight into their final slots,
-        # instead of building a separate seg_onehot tensor and then torch.cat-copying everything again.
-        out = torch.zeros((C + len(self.all_labels), *seg.shape), dtype=img.dtype)
+        # instead of building a separate seg_onehot tensor and then torch.cat-copying everything again. Only the
+        # one-hot tail needs zeroing; the image channels are fully overwritten anyway.
+        out = torch.empty((C + len(self.all_labels), *seg.shape), dtype=img.dtype)
         out[:C] = img
+        out[C:].zero_()
         for i, l in enumerate(self.all_labels):
             out[C + i][seg == l] = 1
         data_dict['image'] = out

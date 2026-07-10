@@ -321,9 +321,7 @@ class SpatialTransform(BasicTransform):
                         if not bg_is_zero:
                             result_seg[c][~out] = labels[0]
                     else:
-                        for i, u in enumerate(labels):
-                            if i == 0 and bg_is_zero:
-                                continue
+                        for u in (labels[1:] if bg_is_zero else labels):
                             result_seg[c][
                                 grid_sample(
                                     ((segmentation[c] == u).float())[None, None],
@@ -333,19 +331,18 @@ class SpatialTransform(BasicTransform):
                                     align_corners=self.align_corners
                                 )[0][0] >= 0.5] = u
             else:
-                # The interpolated one-hot label channels form a convex combination, so at every output voxel they
-                # sum to <= scale_factor. Hence at most one label can exceed 0.7 * scale_factor, which makes the old
-                # "threshold-assign, then argmax the undecided leftovers" logic identical to a plain per-voxel argmax
-                # over all labels. We compute that argmax incrementally so we never materialize the
-                # (num_labels, *patch_size) stack (nor a done_mask): only a running best value and the winning label
-                # (written straight into result_seg) are kept. Output is bit-identical: the running comparison is
-                # done in float16 to match the old tmp dtype, and ties resolve to the lowest label index, exactly as
-                # torch.argmax(0) does.
+                # Per-voxel argmax over the interpolated one-hot label channels, computed incrementally so the
+                # (num_labels, *patch_size) stack is never materialized: only a running best value and the winning
+                # label (written straight into result_seg) are kept. This equals threshold-then-argmax sampling
+                # because the interpolated channels form a convex combination (they sum to <= scale_factor per
+                # voxel, so at most one label can exceed 0.7 * scale_factor). Load-bearing for bit-identical
+                # results: the running comparison is done in float16, and the strict > keeps the lowest label
+                # index on ties, exactly like torch.argmax(0) over a float16 stack.
                 scale_factor = 1000
                 for c in range(segmentation.shape[0]):
                     labels = torch.from_numpy(np.sort(pd.unique(segmentation[c].numpy().ravel())))
                     best_val = None
-                    for i, u in enumerate(labels):
+                    for u in labels:
                         onehot = (segmentation[c] == u).float()
                         onehot *= scale_factor
                         cur = grid_sample(
@@ -355,12 +352,13 @@ class SpatialTransform(BasicTransform):
                             padding_mode=grid_sample_padding_mode,
                             align_corners=self.align_corners
                         )[0][0].to(torch.float16)
-                        if i == 0:
+                        if best_val is None:
                             best_val = cur
-                            result_seg[c] = u
+                            if u != 0:  # result_seg is zero-initialized, so filling with 0 would be a no-op
+                                result_seg[c] = u
                         else:
                             better = cur > best_val
-                            best_val[better] = cur[better]
+                            torch.maximum(best_val, cur, out=best_val)
                             result_seg[c][better] = u
 
         if self._requires_constant_padding_fixup(self.border_mode_seg, self.padding_value_seg):

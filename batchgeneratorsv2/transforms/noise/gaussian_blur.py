@@ -20,7 +20,8 @@ def blur_dimension(img: torch.Tensor, sigma: float, dim_to_blur: int, force_use_
                 where C is the channel dimension and X, Y, Z are spatial dimensions.
     :param sigma: The standard deviation of the Gaussian kernel.
     :param dim_to_blur: The dimension along which to apply the Gaussian blur (0 for X, 1 for Y, 2 for Z).
-    :return: The blurred image tensor.
+    :return: The blurred image tensor. `img` is never modified; a new tensor is returned (callers such as
+             GaussianBlurTransform chain these calls and rely on this non-mutation contract).
     """
     assert img.ndim - 1 > dim_to_blur, "dim_to_blur must be a valid spatial dimension of the input image."
     # Adjustments for kernel based on image dimensions

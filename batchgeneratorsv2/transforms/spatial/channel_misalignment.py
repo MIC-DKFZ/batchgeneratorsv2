@@ -206,12 +206,12 @@ class ChannelMisalignmentTransform(ImageOnlyTransform):
                 # transformed by affine rather than its transpose (see issue #24).
                 grid = torch.matmul(grid, torch.from_numpy(params['affine'].T).float())
 
-            # we center the grid around the center_location_in_pixels. We should center the mean of the grid, not the
-            # center position. This is only meaningful when we elastic deform; new_center is all-zeros, so in the
-            # non-deform case `grid += (0 - 0)` is a wasted full-grid pass (x + 0.0 == x) and is skipped.
+            # re-center the mean of the grid (not the center position). new_center is all-zeros here (translation is
+            # handled via the shifted crop center below, not via the grid), so in the non-deform case mn is also 0 and
+            # `grid += (0 - 0)` would be a wasted full-grid pass -> skipped. This skip is only valid while new_center
+            # stays all-zeros; if a nonzero new_center is ever reintroduced, the shift must apply in both paths again.
             if params['elastic_offsets'] is not None:
                 mn = grid.mean(dim=list(range(img.ndim - 1)))
-                # new_center = torch.Tensor([c - s / 2 for c, s in zip(params['center_location_in_pixels'], img.shape[1:])])
                 new_center = torch.Tensor([0, 0, 0])
                 grid += (new_center - mn)
 

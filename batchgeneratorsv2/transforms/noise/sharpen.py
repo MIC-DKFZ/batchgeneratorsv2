@@ -81,7 +81,7 @@ class SharpeningTransform(ImageOnlyTransform):
                 continue
 
             if clamp:
-                mn, mx = torch.min(img[c]), torch.max(img[c])
+                mn, mx = torch.aminmax(img[c])  # single reduction pass instead of separate min()/max()
 
             x = img[c].unsqueeze(0).unsqueeze(0)  # (1, 1, H, W) or (1, 1, D, H, W)
             padded = F.pad(x, pad, mode='replicate')
