@@ -303,6 +303,11 @@ class SpatialTransform(BasicTransform):
             if self.bg_style_seg_sampling:
                 for c in range(segmentation.shape[0]):
                     labels = torch.from_numpy(np.sort(pd.unique(segmentation[c].numpy().ravel())))
+                    # result_seg is zero-initialized, so when the lowest label is the 0 background we never have to
+                    # write it: any voxel it would claim is already 0, and being the lowest label it can only be
+                    # overwritten by (never overwrite) the foreground labels processed after it. Skipping it saves a
+                    # full grid_sample per channel. Output is bit-identical.
+                    bg_is_zero = bool(labels[0] == 0)
                     # if we only have 2 labels then we can save compute time
                     if len(labels) == 2:
                         out = grid_sample(
@@ -313,9 +318,12 @@ class SpatialTransform(BasicTransform):
                             align_corners=self.align_corners
                         )[0][0] >= 0.5
                         result_seg[c][out] = labels[1]
-                        result_seg[c][~out] = labels[0]
+                        if not bg_is_zero:
+                            result_seg[c][~out] = labels[0]
                     else:
                         for i, u in enumerate(labels):
+                            if i == 0 and bg_is_zero:
+                                continue
                             result_seg[c][
                                 grid_sample(
                                     ((segmentation[c] == u).float())[None, None],
@@ -325,26 +333,35 @@ class SpatialTransform(BasicTransform):
                                     align_corners=self.align_corners
                                 )[0][0] >= 0.5] = u
             else:
+                # The interpolated one-hot label channels form a convex combination, so at every output voxel they
+                # sum to <= scale_factor. Hence at most one label can exceed 0.7 * scale_factor, which makes the old
+                # "threshold-assign, then argmax the undecided leftovers" logic identical to a plain per-voxel argmax
+                # over all labels. We compute that argmax incrementally so we never materialize the
+                # (num_labels, *patch_size) stack (nor a done_mask): only a running best value and the winning label
+                # (written straight into result_seg) are kept. Output is bit-identical: the running comparison is
+                # done in float16 to match the old tmp dtype, and ties resolve to the lowest label index, exactly as
+                # torch.argmax(0) does.
+                scale_factor = 1000
                 for c in range(segmentation.shape[0]):
                     labels = torch.from_numpy(np.sort(pd.unique(segmentation[c].numpy().ravel())))
-                    # torch.where(torch.bincount(segmentation.ravel()) > 0)[0].to(segmentation.dtype)
-                    tmp = torch.zeros((len(labels), *self.patch_size), dtype=torch.float16)
-                    scale_factor = 1000
-                    done_mask = torch.zeros(*self.patch_size, dtype=torch.bool)
+                    best_val = None
                     for i, u in enumerate(labels):
-                        tmp[i] = grid_sample(
-                            ((segmentation[c] == u).float() * scale_factor)[None, None],
+                        onehot = (segmentation[c] == u).float()
+                        onehot *= scale_factor
+                        cur = grid_sample(
+                            onehot[None, None],
                             grid[None],
                             mode=self.mode_seg,
                             padding_mode=grid_sample_padding_mode,
                             align_corners=self.align_corners
-                        )[0][0]
-                        mask = tmp[i] > (0.7 * scale_factor)
-                        result_seg[c][mask] = u
-                        done_mask = done_mask | mask
-                    if not torch.all(done_mask):
-                        result_seg[c][~done_mask] = labels[tmp[:, ~done_mask].argmax(0)]
-                    del tmp
+                        )[0][0].to(torch.float16)
+                        if i == 0:
+                            best_val = cur
+                            result_seg[c] = u
+                        else:
+                            better = cur > best_val
+                            best_val[better] = cur[better]
+                            result_seg[c][better] = u
 
         if self._requires_constant_padding_fixup(self.border_mode_seg, self.padding_value_seg):
             out_of_bounds_mask = self._compute_out_of_bounds_mask(grid, segmentation.shape[1:])
