@@ -214,14 +214,59 @@ class ChannelMisalignmentTransform(ImageOnlyTransform):
                 mn = 0
 
             # new_center = torch.Tensor([c - s / 2 for c, s in zip(params['center_location_in_pixels'], img.shape[1:])])
-            new_center = torch.Tensor([0, 0, 0])
+            new_center = torch.zeros(len(im_shape))
             grid += (new_center - mn)
+            grid_sample_grid = _convert_my_grid_to_grid_sample_grid(grid, img.shape[1:])[None]
 
             for ch in self.im_channels_2_misalign:
                 img[ch, ...] = grid_sample(img[ch, ...].unsqueeze(0).unsqueeze(0),
-                                           _convert_my_grid_to_grid_sample_grid(grid, img.shape[1:])[None],
+                                           grid_sample_grid,
                                            mode='bilinear', padding_mode="zeros", align_corners=False)[0]
                 img[ch, ...] = crop_tensor(img[ch, ...].unsqueeze(0),
                                            [math.floor(i) for i in params['center_location_in_pixels']], im_shape,
                                            pad_mode='constant', pad_kwargs={'value': 0})
             return img
+
+
+# from copy import deepcopy
+# import SimpleITK as sitk
+# from pathlib import Path
+
+# if __name__ == '__main__':
+
+#     source_folder = Path('./test_images/')
+
+#     img0 = sitk.GetArrayFromImage(sitk.ReadImage(source_folder / 'case001_0000.nii.gz'))
+#     img1 = sitk.GetArrayFromImage(sitk.ReadImage(source_folder / 'case001_0001.nii.gz'))
+#     img2 = sitk.GetArrayFromImage(sitk.ReadImage(source_folder / 'case001_0002.nii.gz'))
+#     seg = sitk.GetArrayFromImage(sitk.ReadImage(source_folder / 'case001.nii.gz'))
+
+#     sp = ChannelMisalignmentTransform(
+#         im_channels_2_misalign=(0,),
+
+#         squeezing_zyx=(0.0, 0.1, 0.0),
+#         p_squeeze=1.0,
+
+#         rotation_ax_cor_sag=(30, 0, 0),
+#         rad_or_deg="deg",
+#         p_rotation=1.0,
+
+#         shift_zyx=(5, 100, 20),
+#         p_shift = 1.0,
+
+#     )
+
+#     data_dict = {'image': torch.cat([torch.from_numpy(deepcopy(img0[None])).float(),
+#                                      torch.from_numpy(deepcopy(img1[None])).float(),
+#                                      torch.from_numpy(deepcopy(img2[None])).float()], dim=0)}
+#     if seg is not None:
+#         data_dict['segmentation'] = torch.from_numpy(deepcopy(seg[None]))
+
+#     out = sp(**data_dict)
+
+#     sitk.WriteImage(sitk.GetImageFromArray(img0), source_folder / 'original_ch0.nii.gz')
+#     sitk.WriteImage(sitk.GetImageFromArray(img1), source_folder / 'original_ch1.nii.gz')
+#     sitk.WriteImage(sitk.GetImageFromArray(img2), source_folder / 'original_ch2.nii.gz')
+#     sitk.WriteImage(sitk.GetImageFromArray(out['image'][0].numpy()), source_folder / 'transformed_ch0.nii.gz')
+#     sitk.WriteImage(sitk.GetImageFromArray(out['image'][1].numpy()), source_folder / 'transformed_ch1.nii.gz')
+#     sitk.WriteImage(sitk.GetImageFromArray(out['image'][2].numpy()), source_folder / 'transformed_ch2.nii.gz')
