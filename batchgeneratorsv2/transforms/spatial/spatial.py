@@ -13,6 +13,9 @@ from batchgeneratorsv2.transforms.base.basic_transform import BasicTransform
 from batchgeneratorsv2.transforms.utils.cropping import crop_tensor
 
 
+SEG_TIEBREAKS = ('nearest', 'lowest', 'highest')
+
+
 class SpatialTransform(BasicTransform):
     def __init__(self,
                  patch_size: Tuple[int, ...],
@@ -28,7 +31,7 @@ class SpatialTransform(BasicTransform):
                  p_scaling: float = 0,
                  scaling: RandomScalar = (0.7, 1.3),
                  p_synchronize_scaling_across_axes: float = 0,
-                 bg_style_seg_sampling: bool = True,
+                 bg_style_seg_sampling: bool = False,
                  mode_seg: str = 'bilinear',
                  border_mode_seg: str = "zeros",
                  center_deformation: bool = True,
@@ -36,17 +39,29 @@ class SpatialTransform(BasicTransform):
                  padding_mode_image: str = "zeros",
                  padding_value_seg: float = 0,
                  padding_value_image: float = 0,
-                 align_corners: bool = False
+                 align_corners: bool = False,
+                 *,
+                 seg_tiebreak: str = 'nearest'
                  ):
         """
         magnitude must be given in pixels!
         deformation scale is given as a paercentage of the edge length
 
         padding_mode_image: see torch grid_sample documentation. This currently applies to image and regression target
-        because both call self._apply_to_image. Can be "zeros", "constant", "reflection", "border"
+        because both call self._apply_to_image. Can be "zeros", "constant", "reflection", "border". "constant" pads
+        with padding_value_image and resamples the padded image, exactly as "zeros" does with 0.
 
         border_mode_seg: can be "zeros", "constant", "reflection", "border". padding values are only considered for
-        the corresponding "constant" modes.
+        the corresponding "constant" modes. "zeros" and "constant" pad the segmentation with a label (0 or
+        padding_value_seg) and resample the padded segmentation, so the image ends at the outer edge of its
+        border pixels: a sample point up to half a pixel past the last pixel centre still gets that pixel's
+        label, and one further out gets the padding label wherever the padding outweighs the image.
+
+        seg_tiebreak: how to settle voxels where two labels share the top interpolated score, which is what
+        every boundary voxel becomes when a sample point falls exactly between two labels. 'nearest' takes
+        the nearest neighbour label (symmetric in the labels, and the only option that is a function of the
+        geometry rather than of the label values), 'lowest' keeps the smallest label (plain argmax, matches
+        nnU-Net's resample_torch), 'highest' keeps the largest. Only used when mode_seg != 'nearest'.
         """
         super().__init__()
         self.patch_size = patch_size
@@ -65,6 +80,9 @@ class SpatialTransform(BasicTransform):
         self.p_synchronize_scaling_across_axes = p_synchronize_scaling_across_axes
         self.p_synchronize_def_scale_across_axes = p_synchronize_def_scale_across_axes
         self.bg_style_seg_sampling = bg_style_seg_sampling
+        if seg_tiebreak not in SEG_TIEBREAKS:
+            raise ValueError(f'unknown seg_tiebreak: {seg_tiebreak}. Must be one of {SEG_TIEBREAKS}')
+        self.seg_tiebreak = seg_tiebreak
         self.mode_seg = mode_seg
         self.border_mode_seg = border_mode_seg
         self.center_deformation = center_deformation
@@ -103,19 +121,24 @@ class SpatialTransform(BasicTransform):
             return padding_mode
         raise RuntimeError(f'Unknown pad mode: {padding_mode}')
 
-    @staticmethod
-    def _requires_constant_padding_fixup(padding_mode: str, padding_value: float) -> bool:
-        return padding_mode == 'constant' and padding_value != 0
-
-    def _compute_out_of_bounds_mask(self, grid: torch.Tensor, spatial_shape: Tuple[int, ...]) -> torch.Tensor:
+    def _kernel_bound(self, spatial_shape: Tuple[int, ...]) -> np.ndarray:
+        """
+        Per grid axis, the largest |grid coordinate| at which the self.mode_seg kernel still draws on pixels
+        inside the image only (bilinear reaches one pixel, bicubic two). Axis k of the grid is spatial axis
+        dim - 1 - k, which is how grid_sample reads it (x is the last spatial axis).
+        """
+        margin = {'bilinear': 0, 'bicubic': 1}[self.mode_seg]
+        size = np.array(spatial_shape[::-1], dtype=float)
+        # pixel coordinate x < margin or x > size - 1 - margin, as a bound on |grid coordinate| (symmetric)
         if self.align_corners:
-            lo = grid.new_tensor(-1.)
-            hi = grid.new_tensor(1.)
-        else:
-            size = grid.new_tensor(spatial_shape)
-            lo = -1 + 1 / size
-            hi = 1 - 1 / size
-        return ((grid < lo) | (grid > hi)).any(dim=-1)
+            return 1 - 2 * margin / np.maximum(size - 1, 1e-12)
+        return 1 - (2 * margin + 1) / size
+
+    def _may_reach_outside(self, grid: torch.Tensor, spatial_shape: Tuple[int, ...]) -> bool:
+        """False guarantees that no kernel reaches outside. One contiguous pass over the grid, under 1 ms at 128^3."""
+        bound = self._kernel_bound(spatial_shape).min()
+        gmin, gmax = torch.aminmax(grid)
+        return not (-gmin.item() <= bound and gmax.item() <= bound)
 
     def get_parameters(self, **data_dict) -> dict:
         dim = data_dict['image'].ndim - 1
@@ -260,16 +283,19 @@ class SpatialTransform(BasicTransform):
             )
 
         grid = params['grid']
+        # 'constant' pads with padding_value_image and resamples the padded image, like 'zeros' does with 0 and
+        # like the segmentation path does with its padding label. grid_sample only pads with zeros, and it is
+        # linear in its input, so sampling (img - v) and adding v back is exactly constant padding with v.
+        shift = float(self.padding_value_image) if self.padding_mode_image == 'constant' else 0.
         result = grid_sample(
-            img[None],
+            (img - shift)[None] if shift != 0 else img[None],
             grid[None],
             mode=self.mode_image,
             padding_mode=self._get_grid_sample_padding_mode(self.padding_mode_image),
             align_corners=self.align_corners,
         )[0]
-        if self._requires_constant_padding_fixup(self.padding_mode_image, self.padding_value_image):
-            out_of_bounds_mask = self._compute_out_of_bounds_mask(grid, img.shape[1:])
-            result.masked_fill_(out_of_bounds_mask.unsqueeze(0), self.padding_value_image)
+        if shift != 0:
+            result += shift
         return result
 
     def _apply_to_segmentation(self, segmentation: torch.Tensor, **params) -> torch.Tensor:
@@ -289,81 +315,176 @@ class SpatialTransform(BasicTransform):
 
         grid = params['grid']
         grid_sample_padding_mode = self._get_grid_sample_padding_mode(self.border_mode_seg)
+        # 'zeros' and 'constant' pad the segmentation with a label: 0, or padding_value_seg. Outside the image is
+        # then treated exactly like pixels of that label - pad first, then resample - so the image ends at the
+        # edge of its outermost pixels, not at their centres. A sample point half a pixel past the last pixel
+        # centre still belongs to that pixel, and an augmented patch reaching past the crop does not cut the
+        # segmentation short. That is also what the image path does with zeros padding. 'border' and
+        # 'reflection' never leave the image.
+        pads = grid_sample_padding_mode == 'zeros'
+        pad_label = self.padding_value_seg if self.border_mode_seg == 'constant' else 0
 
         if self.mode_seg == 'nearest':
-            result_seg = grid_sample(
-                segmentation[None].float(),
+            # grid_sample only pads with zeros; shifting by the padding label makes that padding the label
+            shift = float(pad_label) if pads else 0.
+            result_seg = (grid_sample(
+                segmentation[None].float() - shift,
                 grid[None],
                 mode=self.mode_seg,
                 padding_mode=grid_sample_padding_mode,
                 align_corners=self.align_corners
-            )[0].to(segmentation.dtype)
+            )[0] + shift).to(segmentation.dtype)
         else:
+            # Both branches compute the same thing: the per-voxel argmax over the interpolated one-hot label
+            # channels, with self.seg_tiebreak settling voxels where the top score is shared. They are
+            # bit-identical (tests/test_seg_sampling.py pins that) and differ only in time and memory:
+            #
+            #   bg_style_seg_sampling=True   materializes the (n_labels, *patch_size) float16 score stack and
+            #                                argmaxes it in one go.
+            #   bg_style_seg_sampling=False  keeps a single running score volume and folds the argmax into the
+            #                                label loop.
+            #
+            # False is the default because it is the better of the two on both counts. Measured on a 64^3
+            # patch: 0.51x the time at 3 labels, 0.68x at 12, 0.71x at 40, against 0.5 MB of score buffer
+            # instead of 1.5 / 6 / 20 MB. The stack only looked cheaper while the old code was allowed to
+            # skip the background label and to answer the two-label case with a single grid_sample - the
+            # first is not compatible with an argmax, and the second now sits in front of both branches,
+            # where it makes them identical at two labels. True is kept only so callers that pass it
+            # explicitly keep working; there is no longer a reason to choose it.
+            #
+            # The float16 score representation and scale_factor are load-bearing for that bit-identity: float16
+            # has a spacing of 0.5 at this magnitude, so it collapses near ties into exact ones, and both
+            # branches have to collapse the same ones.
+            #
+            # Neither branch uses the old `interpolated >= 0.5` assignment. That rule could leave a voxel
+            # unwritten - where three or more labels meet, no single indicator has to reach 0.5 - and the voxel
+            # then kept the zero result_seg was initialized with, which need not be a label of the input at all.
+            scale_factor = 1000
+            half = 0.5 * scale_factor
             result_seg = torch.zeros((segmentation.shape[0], *self.patch_size), dtype=segmentation.dtype)
-            if self.bg_style_seg_sampling:
-                for c in range(segmentation.shape[0]):
-                    labels = torch.from_numpy(np.sort(pd.unique(segmentation[c].numpy().ravel())))
-                    # result_seg is zero-initialized, so when the lowest label is the 0 background we never have to
-                    # write it: any voxel it would claim is already 0, and being the lowest label it can only be
-                    # overwritten by (never overwrite) the foreground labels processed after it. Skipping it saves a
-                    # full grid_sample per channel. Output is bit-identical.
-                    bg_is_zero = bool(labels[0] == 0)
-                    # if we only have 2 labels then we can save compute time
-                    if len(labels) == 2:
-                        out = grid_sample(
-                            ((segmentation[c] == labels[1]).float())[None, None],
+            nn_seg = None  # nearest neighbour sample, computed on first use
+
+            def _nearest():
+                # the nearest neighbour of the padded segmentation, i.e. what mode_seg='nearest' returns. Where it
+                # is not one of the tied labels it is not used (see use_nn), so it can never invent a label.
+                nonlocal nn_seg
+                if nn_seg is None:
+                    shift = float(pad_label) if pads else 0.
+                    nn_seg = (grid_sample(
+                        segmentation[None].float() - shift,
+                        grid[None],
+                        mode='nearest',
+                        padding_mode=grid_sample_padding_mode,
+                        align_corners=self.align_corners
+                    )[0] + shift).to(segmentation.dtype)
+                return nn_seg
+
+            # The padding label enters the argmax only for patches whose kernel reaches outside the image, which
+            # _may_reach_outside establishes cheaply; the usual patch stays inside, and its scores are computed
+            # exactly as they would be without padding.
+            may_reach_outside = pads and self._may_reach_outside(grid, segmentation.shape[1:])
+            # every label's indicator is built into the same input-sized float buffer (torch.eq writes 0. / 1.
+            # straight into it) rather than allocating a bool and a float tensor afresh per label: one pass over
+            # the input per label instead of two. Allocated on first use, so single-label channels never need it
+            ind_buf = []
+
+            for c in range(segmentation.shape[0]):
+                labels = torch.from_numpy(np.sort(pd.unique(segmentation[c].numpy().ravel())))
+                if may_reach_outside:
+                    labels = torch.unique(torch.cat((labels, torch.tensor([pad_label]).to(labels.dtype))))
+                if len(labels) == 1:
+                    result_seg[c] = labels[0].item()
+                    continue
+
+                def _score(u):
+                    if not ind_buf:
+                        ind_buf.append(torch.empty(segmentation.shape[1:], dtype=torch.float32))
+                    ind = ind_buf[0]
+                    torch.eq(segmentation[c], u, out=ind)
+                    if may_reach_outside and u == pad_label:
+                        # the padding label's indicator is 1 outside the image: sample (ind - 1) with zeros padding
+                        # and add the 1 back
+                        return grid_sample(
+                            ind.sub_(1).mul_(scale_factor)[None, None],
                             grid[None],
                             mode=self.mode_seg,
                             padding_mode=grid_sample_padding_mode,
                             align_corners=self.align_corners
-                        )[0][0] >= 0.5
-                        result_seg[c][out] = labels[1]
-                        if not bg_is_zero:
-                            result_seg[c][~out] = labels[0]
+                        )[0][0].add_(scale_factor).to(torch.float16)
+                    return grid_sample(
+                        ind.mul_(scale_factor)[None, None],
+                        grid[None],
+                        mode=self.mode_seg,
+                        padding_mode=grid_sample_padding_mode,
+                        align_corners=self.align_corners
+                    )[0][0].to(torch.float16)
+
+                if len(labels) == 2:
+                    # Shared by both branches, so they cannot drift apart here. grid_sample is linear in its
+                    # input and does not clip, and with the padding label counted the indicators partition the
+                    # padded image, so the two scores sum to scale_factor everywhere: the second label is the
+                    # argmax exactly where its own score passes half of it, and one grid_sample answers the whole
+                    # channel instead of two.
+                    hi = _score(labels[1])
+                    better = (hi >= half) if self.seg_tiebreak == 'highest' else (hi > half)
+                    # with two labels the nearest neighbour is always one of them, so every tie is its to settle
+                    use_nn = (hi == half) if self.seg_tiebreak == 'nearest' else None
+                    result_seg[c] = labels[0].item()
+                    result_seg[c][better] = labels[1]
+                elif self.bg_style_seg_sampling:
+                    scores = torch.empty((len(labels), *self.patch_size), dtype=torch.float16)
+                    for i, u in enumerate(labels):
+                        scores[i] = _score(u)
+                    if self.seg_tiebreak == 'highest':
+                        # argmax reports the first maximum, so reverse the stack to get the last one
+                        winner = len(labels) - 1 - scores.flip(0).argmax(0)
                     else:
-                        for u in (labels[1:] if bg_is_zero else labels):
-                            result_seg[c][
-                                grid_sample(
-                                    ((segmentation[c] == u).float())[None, None],
-                                    grid[None],
-                                    mode=self.mode_seg,
-                                    padding_mode=grid_sample_padding_mode,
-                                    align_corners=self.align_corners
-                                )[0][0] >= 0.5] = u
-            else:
-                # Per-voxel argmax over the interpolated one-hot label channels, computed incrementally so the
-                # (num_labels, *patch_size) stack is never materialized: only a running best value and the winning
-                # label (written straight into result_seg) are kept. This equals threshold-then-argmax sampling
-                # because the interpolated channels form a convex combination (they sum to <= scale_factor per
-                # voxel, so at most one label can exceed 0.7 * scale_factor). Load-bearing for bit-identical
-                # results: the running comparison is done in float16, and the strict > keeps the lowest label
-                # index on ties, exactly like torch.argmax(0) over a float16 stack.
-                scale_factor = 1000
-                for c in range(segmentation.shape[0]):
-                    labels = torch.from_numpy(np.sort(pd.unique(segmentation[c].numpy().ravel())))
+                        winner = scores.argmax(0)
+                    result_seg[c] = labels[winner].to(result_seg.dtype)
+                    if self.seg_tiebreak == 'nearest':
+                        # The nearest neighbour settles a tie only if its label is one of the tied ones: where
+                        # three or more labels meet it can be a label that lost.
+                        own = scores.gather(0, torch.searchsorted(labels, _nearest()[c])[None])[0]
+                        use_nn = own == scores.max(0).values
+                        del own
+                    else:
+                        use_nn = None
+                    del scores
+                else:
                     best_val = None
+                    if self.seg_tiebreak == 'nearest':
+                        # The nearest neighbour's label settles a voxel where it has the top score: where it
+                        # won outright that changes nothing, where it is tied it settles the tie. Where three
+                        # or more labels meet it can be a label that lost, and then the argmax winner stands.
+                        # So keep the score of the nearest neighbour's label per voxel and compare it with the
+                        # top score once, at the end. -inf never equals a score: a voxel whose nearest
+                        # neighbour is not among the labels keeps the argmax.
+                        nn_c = _nearest()[c]
+                        nn_score = torch.full(nn_c.shape, float('-inf'), dtype=torch.float16)
+                        is_nn = torch.empty(nn_c.shape, dtype=torch.bool)
+                    else:
+                        nn_c = None
+                    better = torch.empty(tuple(self.patch_size), dtype=torch.bool)
                     for u in labels:
-                        onehot = (segmentation[c] == u).float()
-                        onehot *= scale_factor
-                        cur = grid_sample(
-                            onehot[None, None],
-                            grid[None],
-                            mode=self.mode_seg,
-                            padding_mode=grid_sample_padding_mode,
-                            align_corners=self.align_corners
-                        )[0][0].to(torch.float16)
+                        cur = _score(u)
+                        if nn_c is not None:
+                            torch.eq(nn_c, u, out=is_nn)
+                            torch.where(is_nn, cur, nn_score, out=nn_score)
                         if best_val is None:
                             best_val = cur
-                            if u != 0:  # result_seg is zero-initialized, so filling with 0 would be a no-op
-                                result_seg[c] = u
-                        else:
-                            better = cur > best_val
-                            torch.maximum(best_val, cur, out=best_val)
-                            result_seg[c][better] = u
+                            result_seg[c] = u.item()
+                            continue
+                        # '>=' lets the later (larger) label take ties, '>' leaves them with the earlier one
+                        (torch.ge if self.seg_tiebreak == 'highest' else torch.gt)(cur, best_val, out=better)
+                        torch.maximum(best_val, cur, out=best_val)
+                        result_seg[c][better] = u
+                    use_nn = (nn_score == best_val) if nn_c is not None else None
 
-        if self._requires_constant_padding_fixup(self.border_mode_seg, self.padding_value_seg):
-            out_of_bounds_mask = self._compute_out_of_bounds_mask(grid, segmentation.shape[1:])
-            result_seg.masked_fill_(out_of_bounds_mask.unsqueeze(0), self.padding_value_seg)
+                if use_nn is not None and torch.any(use_nn):
+                    # where the nearest neighbour's label won outright this changes nothing. torch.where rather
+                    # than indexing: use_nn holds nearly everywhere, and indexing materializes an index per voxel
+                    torch.where(use_nn, _nearest()[c], result_seg[c], out=result_seg[c])
+
         del grid
         return result_seg.contiguous()
 
