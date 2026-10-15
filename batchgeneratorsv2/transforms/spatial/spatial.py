@@ -5,7 +5,7 @@ from typing import Tuple, List, Union
 import numpy as np
 import pandas as pd
 import torch
-from scipy.ndimage import fourier_gaussian
+from scipy.ndimage import find_objects, fourier_gaussian
 from torch.nn.functional import grid_sample
 
 from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
@@ -462,14 +462,21 @@ class SpatialTransform(BasicTransform):
                         nn_c = _nearest()[c]
                         nn_score = torch.full(nn_c.shape, float('-inf'), dtype=torch.float16)
                         is_nn = torch.empty(nn_c.shape, dtype=torch.bool)
+                        # A label can only be the nearest neighbour's inside the bounding box of its nearest
+                        # neighbour voxels, so that is all the bookkeeping has to look at: typically a few % of
+                        # the patch per label instead of all of it. One pass over nn_c finds every box.
+                        nn_boxes = _label_boxes(nn_c, int(labels[-1]))
                     else:
                         nn_c = None
                     better = torch.empty(tuple(self.patch_size), dtype=torch.bool)
                     for u in labels:
                         cur = _score(u)
                         if nn_c is not None:
-                            torch.eq(nn_c, u, out=is_nn)
-                            torch.where(is_nn, cur, nn_score, out=nn_score)
+                            box = _label_box(nn_boxes, u)
+                            if box is not None:
+                                is_nn_b, nn_score_b = is_nn[box], nn_score[box]
+                                torch.eq(nn_c[box], u, out=is_nn_b)
+                                torch.where(is_nn_b, cur[box], nn_score_b, out=nn_score_b)
                         if best_val is None:
                             best_val = cur
                             result_seg[c] = u.item()
@@ -497,6 +504,32 @@ class SpatialTransform(BasicTransform):
     def _apply_to_bbox(self, bbox, **params):
         raise NotImplementedError
     
+
+def _label_boxes(labels: torch.Tensor, max_label: int):
+    """
+    {label: tuple of slices}, the bounding box of every positive label in an integer label map whose largest
+    label is max_label, from one pass over it (scipy's find_objects). Labels <= 0 and labels that do not occur
+    have no entry. None where that does not apply - float or bool label maps, tensors not on the CPU, or label
+    values so large (instance ids, say) that find_objects' list of max_label entries would cost more than it
+    saves: callers then use the whole volume.
+    """
+    if (labels.device.type != 'cpu' or labels.dtype.is_floating_point or labels.dtype == torch.bool
+            or max_label > 65535):
+        return None
+    return {i + 1: b for i, b in enumerate(find_objects(labels.numpy(), max_label=max(max_label, 1)))
+            if b is not None}
+
+
+def _label_box(boxes, u):
+    """
+    Where label u can occur according to _label_boxes: its box, the whole volume (no boxes, or u <= 0, which
+    find_objects does not report), or None if it does not occur at all.
+    """
+    u = int(u)
+    if boxes is None or u <= 0:
+        return (slice(None),)
+    return boxes.get(u)
+
 
 def create_affine_matrix_3d(rotation_angles, scaling_factors):
     # Rotation matrices for each axis
