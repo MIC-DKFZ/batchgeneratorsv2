@@ -93,13 +93,17 @@ class SpatialTransform(BasicTransform):
         self.align_corners = align_corners
         self._grid_cache = {}  # key: (patch_size, dtype) -> base grid tensor
 
-    def _get_base_grid_clone(self) -> torch.Tensor:
+    def _get_base_grid(self) -> torch.Tensor:
+        # cached and shared: callers must not modify it in place (use _get_base_grid_clone for that)
         key = tuple(self.patch_size)
         g = self._grid_cache.get(key)
         if g is None:
             g = _create_centered_identity_grid2(self.patch_size).float().contiguous()
             self._grid_cache[key] = g
-        return g.clone()
+        return g
+
+    def _get_base_grid_clone(self) -> torch.Tensor:
+        return self._get_base_grid().clone()
 
     @staticmethod
     def _get_crop_pad_settings(padding_mode: str, padding_value: float):
@@ -236,11 +240,13 @@ class SpatialTransform(BasicTransform):
                     center_location_in_pixels.append(np.random.uniform(mn, mx))
         # Precompute the deformed grid once (shared by image, segmentation, regression target)
         if affine is not None or offsets is not None:
-            grid = self._get_base_grid_clone()
-
-            # we deform first, then rotate
+            # we deform first, then rotate. Without offsets the matmul below is the first op and does not write
+            # its input, so the cached base grid needs no copy
             if offsets is not None:
+                grid = self._get_base_grid_clone()
                 grid += offsets
+            else:
+                grid = self._get_base_grid()
             if affine is not None:
                 # grid stores spatial vectors as row vectors (shape [..., dim]), whereas affine is built to act on
                 # column vectors (x' = affine @ x). We therefore multiply by affine.T so that each grid point is
