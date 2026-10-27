@@ -24,6 +24,14 @@ class DownsampleSegForDSTransform(SegOnlyTransform):
                 results.append(segmentation)
             else:
                 new_shape = [round(i * j) for i, j in zip(segmentation.shape[1:], s)]
+                if all(n > 0 and i % n == 0 for i, n in zip(segmentation.shape[1:], new_shape)):
+                    # integer ratio k per axis (always the case for nnU-Net's pooling): nearest-exact takes source
+                    # index floor((i + 0.5) * k) = k * i + k // 2, which is a strided slice. Same voxels, without
+                    # the full-resolution float copy interpolate needs
+                    ratios = [i // n for i, n in zip(segmentation.shape[1:], new_shape)]
+                    results.append(segmentation[(slice(None), *[slice(k // 2, None, k) for k in ratios])].clone(
+                        memory_format=torch.contiguous_format))
+                    continue
                 # interpolate is not defined for short etc
                 if seg_float is None:
                     seg_float = segmentation[None].float()
