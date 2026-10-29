@@ -7,18 +7,23 @@ from batchgeneratorsv2.transforms.intensity.contrast import BGContrast
 
 
 class TestBGContrast(unittest.TestCase):
-    """Ranges that lie below one must be respected, as in batchgenerators' contrast, gamma and scale sampling."""
+    """
+    Ranges that end at or below one must be sampled from the range, as in batchgenerators' contrast, gamma and scale
+    sampling. A range ending at one used to return exactly one for half of the draws.
+    """
 
     def setUp(self):
         self.addCleanup(np.random.set_state, np.random.get_state())
 
-    def test_ranges_below_one_are_respected(self):
-        for value_range, seed in product(((0.7, 0.9), (0.8, 0.8)), range(50)):
+    def test_ranges_up_to_one_are_respected(self):
+        for value_range, seed in product(((0.7, 0.9), (0.8, 0.8), (0.7, 1)), range(50)):
             with self.subTest(value_range=value_range, seed=seed):
                 np.random.seed(seed)
                 factor = BGContrast(value_range)()
                 self.assertGreaterEqual(factor, value_range[0])
                 self.assertLessEqual(factor, value_range[1])
+                # uniform never returns its upper bound, so a factor of exactly one comes from the old upper branch
+                self.assertLess(factor, 1)
 
     def test_number_of_draws_is_unchanged(self):
         # a branch choice and the factor
