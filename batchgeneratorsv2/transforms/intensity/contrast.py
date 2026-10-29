@@ -14,7 +14,9 @@ class BGContrast():
             factor = self.contrast_range()
         else:
             if np.random.random() < 0.5 and self.contrast_range[0] < 1:
-                factor = np.random.uniform(self.contrast_range[0], 1)
+                factor = np.random.uniform(self.contrast_range[0], min(1, self.contrast_range[1]))
+            elif self.contrast_range[1] < 1:
+                factor = np.random.uniform(self.contrast_range[0], self.contrast_range[1])
             else:
                 factor = np.random.uniform(max(self.contrast_range[0], 1), self.contrast_range[1])
         return factor
