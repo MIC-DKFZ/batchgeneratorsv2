@@ -1,72 +1,154 @@
 from copy import deepcopy
+from math import prod
 
 import numpy as np
 from time import time
 import torch
 from skimage.data import camera
-from torch.nn.functional import pad, conv3d, conv1d, conv2d
+from torch.nn.functional import pad
 
-from batchgeneratorsv2.helpers.fft_conv import fft_conv
 from batchgeneratorsv2.helpers.scalar_type import RandomScalar, sample_scalar
 from batchgeneratorsv2.transforms.base.basic_transform import ImageOnlyTransform
 
+# Kernel radius in multiples of sigma. blur_dimension's default; the benchmark keys its decisions on the kernel size
+# this gives, so both must use the same value.
+DEFAULT_TRUNCATE = 6
 
-def blur_dimension(img: torch.Tensor, sigma: float, dim_to_blur: int, force_use_fft: bool = None, truncate: float = 6):
+# The FFT along an axis whose stride is at least this many elements first moves that axis last. A real FFT over
+# lines spaced this far apart in memory is several times slower than over contiguous ones (128^3, outermost axis:
+# 61 vs 13 ms per blur), while for short strides the strided transform is the faster of the two.
+_FFT_TRANSPOSE_MIN_STRIDE = 512
+
+
+def blur_dimension(img: torch.Tensor, sigma: float, dim_to_blur: int, force_use_fft: bool = None,
+                   truncate: float = DEFAULT_TRUNCATE):
     """
     Smoothes an input image with a 1D Gaussian kernel along the specified dimension.
     The function supports 1D, 2D, and 3D images.
+
+    The image is reflect-padded along the blurred axis (d c b | a b c d | c b a). When the kernel radius reaches
+    past the axis length, the reflection continues periodically (scipy.ndimage's mode='mirror'), and an axis of
+    length 1 is repeated.
 
     :param img: Input image tensor with shape (C, X), (C, X, Y), or (C, X, Y, Z),
                 where C is the channel dimension and X, Y, Z are spatial dimensions.
     :param sigma: The standard deviation of the Gaussian kernel.
     :param dim_to_blur: The dimension along which to apply the Gaussian blur (0 for X, 1 for Y, 2 for Z).
+    :param force_use_fft: True: multiply in Fourier space (a 1D real FFT along the blurred axis), which is faster for
+                          large kernels. False or None: direct convolution, whose result is the same on every machine,
+                          thread count and device. Both compute the same blur; their results differ at float32
+                          rounding level.
     :return: The blurred image tensor. `img` is never modified; a new tensor is returned (callers such as
              GaussianBlurTransform chain these calls and rely on this non-mutation contract).
     """
     assert img.ndim - 1 > dim_to_blur, "dim_to_blur must be a valid spatial dimension of the input image."
     # Adjustments for kernel based on image dimensions
     spatial_dims = img.ndim - 1  # Number of spatial dimensions in the input image
+    axis = dim_to_blur + 1
     kernel = _build_kernel(sigma, truncate=truncate)
 
     ksize = kernel.shape[0]
 
-    # Dynamically set up padding, convolution operation, and kernel shape based on the number of spatial dimensions
-    conv_ops = {1: conv1d, 2: conv2d, 3: conv3d}
-    if force_use_fft is not None:
-        conv_op = conv_ops[spatial_dims] if not force_use_fft else fft_conv
+    # Apply padding. torch's reflect padding needs the padding to be shorter than the axis.
+    if ksize // 2 < img.shape[axis]:
+        padding = [0, 0] * spatial_dims  # last axis first, as F.pad expects
+        padding[2 * (spatial_dims - 1 - dim_to_blur)] = ksize // 2
+        padding[2 * (spatial_dims - 1 - dim_to_blur) + 1] = ksize // 2
+        img_padded = pad(img, padding, mode="reflect")
     else:
-        conv_op = conv_ops[spatial_dims]
+        img_padded = _reflect_pad_any_width(img, ksize // 2, axis)
 
-    # Adjust kernel and padding for the specified blur dimension and input dimensions
-    if spatial_dims == 1:
-        kernel = kernel[None, None, :]
-        padding = [ksize // 2, ksize // 2]
-    elif spatial_dims == 2:
-        if dim_to_blur == 0:
-            kernel = kernel[None, None, :, None]
-            padding = [0, 0, ksize // 2, ksize // 2]
-        else:  # dim_to_blur == 1
-            kernel = kernel[None, None, None, :]
-            padding = [ksize // 2, ksize // 2, 0, 0]
-    else:  # spatial_dims == 3
-        # Expand kernel and adjust padding based on the blur dimension
-        if dim_to_blur == 0:
-            kernel = kernel[None, None, :, None, None]
-            padding = [0, 0, 0, 0, ksize // 2, ksize // 2]
-        elif dim_to_blur == 1:
-            kernel = kernel[None, None, None, :, None]
-            padding = [0, 0, ksize // 2, ksize // 2, 0, 0]
-        else:  # dim_to_blur == 2
-            kernel = kernel[None, None, None, None, :]
-            padding = [ksize // 2, ksize // 2, 0, 0, 0, 0]
+    if force_use_fft:
+        return _fft_blur_along_axis(img_padded, kernel, axis)
+    return _direct_blur_along_axis(img_padded, kernel, axis, img.shape[axis])
 
-    # Apply padding
-    img_padded = pad(img, padding, mode="reflect")
 
-    # Apply convolution
-    # remember that weights are [c_out, c_in, ...]
-    img_blurred = conv_op(img_padded[None], kernel.expand(img_padded.shape[0], *[-1] * (kernel.ndim - 1)), groups=img_padded.shape[0])[0]
-    return img_blurred
+def _direct_blur_along_axis(img_padded: torch.Tensor, kernel: torch.Tensor, axis: int, out_len: int) -> torch.Tensor:
+    """
+    Correlates every line of img_padded along `axis` with the 1D `kernel` (what conv1d without padding computes):
+    out = k[0] * x[0:n] + k[1] * x[1:n+1] + ... over shifted views of the padded image.
+
+    Every tap is a separate multiplication followed by a separate addition, in kernel order. Each of these is a
+    correctly rounded float operation (no fused multiply-add), so the result is the same on every machine, thread
+    count and device. Peak memory is about three times the image (padded copy, output, one temporary). torch's CPU
+    convolutions need (kernel size + 2) times the image (im2col) or about 18 times (oneDNN), and their results depend
+    on the CPU, the thread count and which implementation torch picks.
+    """
+    out = img_padded.narrow(axis, 0, out_len) * kernel[0]  # kernel stays on the CPU: its 0-dim taps act as scalars
+    tmp = torch.empty_like(out)
+    for t in range(1, kernel.shape[0]):
+        torch.mul(img_padded.narrow(axis, t, out_len), kernel[t], out=tmp)
+        out += tmp
+    return out
+
+
+def _reflect_pad_any_width(img: torch.Tensor, pad_width: int, axis: int) -> torch.Tensor:
+    """
+    Pads `img` by pad_width on both sides of `axis`, with the same values as F.pad(mode='reflect') wherever that
+    works (pad_width < axis length). Wider padding continues the reflection periodically, with period 2 * (n - 1),
+    as scipy.ndimage's mode='mirror' does. An axis of length 1 is repeated.
+    """
+    n = img.shape[axis]
+    idx = torch.arange(-pad_width, n + pad_width, device=img.device)
+    if n == 1:
+        idx = torch.zeros_like(idx)
+    else:
+        period = 2 * (n - 1)
+        idx = torch.remainder(idx, period)
+        idx = torch.where(idx < n, idx, period - idx)
+    return img.index_select(axis, idx)
+
+
+def _fft_blur_along_axis(img_padded: torch.Tensor, kernel: torch.Tensor, axis: int) -> torch.Tensor:
+    """
+    Correlates every line of img_padded along `axis` with the 1D `kernel`, through a 1D real FFT along that axis
+    only, and returns the part conv1d without padding would return (padded length - len(kernel) + 1 samples).
+    The FFT length is at least the padded length, so the circular wrap-around only reaches samples past that part.
+    """
+    length = img_padded.shape[axis]
+    out_len = length - kernel.shape[0] + 1
+    n_fft = _next_fast_fft_len(length)
+    # conj turns the convolution theorem into correlation, which is what torch's convolutions compute
+    kernel_ft = torch.fft.rfft(kernel.to(device=img_padded.device, dtype=img_padded.dtype), n=n_fft).conj()
+
+    stride = prod(img_padded.shape[axis + 1:])  # img_padded is contiguous
+    if stride < _FFT_TRANSPOSE_MIN_STRIDE:
+        kernel_shape = [1] * img_padded.ndim
+        kernel_shape[axis] = -1
+        spectrum = torch.fft.rfft(img_padded, n=n_fft, dim=axis)
+        spectrum *= kernel_ft.view(kernel_shape)
+        return torch.fft.irfft(spectrum, n=n_fft, dim=axis).narrow(axis, 0, out_len).contiguous()
+
+    # Move the axis last, one 2D transpose per leading index: torch has a fast path for those, while a single
+    # permute(...).contiguous() of the whole tensor is as slow as the strided FFT.
+    outer = prod(img_padded.shape[:axis])
+    lines = torch.empty((outer, stride, length), dtype=img_padded.dtype, device=img_padded.device)
+    img_3d = img_padded.reshape(outer, length, stride)
+    for i in range(outer):
+        lines[i].copy_(img_3d[i].T)
+    spectrum = torch.fft.rfft(lines, n=n_fft, dim=-1)
+    del lines
+    spectrum *= kernel_ft
+    blurred = torch.fft.irfft(spectrum, n=n_fft, dim=-1)[..., :out_len].contiguous()
+    del spectrum
+    out = torch.empty((outer, out_len, stride), dtype=img_padded.dtype, device=img_padded.device)
+    for i in range(outer):
+        out[i].copy_(blurred[i].T)
+    out_shape = list(img_padded.shape)
+    out_shape[axis] = out_len
+    return out.view(out_shape)
+
+
+def _next_fast_fft_len(n: int) -> int:
+    """Smallest n_fft >= n whose only prime factors are 2, 3 and 5. A 7-smooth length was slower in our tests."""
+    while True:
+        m = n
+        for p in (2, 3, 5):
+            while m % p == 0:
+                m //= p
+        if m == 1:
+            return n
+        n += 1
 
 
 class GaussianBlurTransform(ImageOnlyTransform):
@@ -78,14 +160,35 @@ class GaussianBlurTransform(ImageOnlyTransform):
                  benchmark: bool = False
                  ):
         """
-        uses separable gaussian filters for all the speed
+        Gaussian blur, applied as one 1D blur per spatial axis (the Gaussian is separable).
 
-        blur_sigma, if callable, will be called as blur_sigma(image, shape, dim) where shape is (c, x(, y, z) and dim i
-        s 1, 2 or 3 for x, y and z, respectively)
-        :param blur_sigma:
-        :param synchronize_channels:
-        :param synchronize_axes:
-        :param p_per_channel:
+        :param blur_sigma: Standard deviation of the Gaussian in voxels: a number, a (min, max) tuple sampled
+            uniformly, or a callable. A callable is called as blur_sigma(shape, dim=dim), where shape is (c, x(, y, z))
+            and dim is 1, 2 or 3 for x, y and z, respectively (None with synchronize_axes).
+        :param synchronize_channels: True: all blurred channels get the same sigmas. False: each channel draws its own.
+        :param synchronize_axes: True: one sigma for all spatial axes. False: one sigma per axis.
+        :param p_per_channel: Probability that a channel is blurred.
+        :param benchmark: False: always direct convolution. True: the first time an (axis length, kernel size) pair
+            comes up, time direct convolution and an FFT on it and use the faster one for that pair from then on.
+            Faster with large sigmas, but not reproducible (see below).
+
+        Reproducibility
+        ---------------
+        Use benchmark=False if you need reproducible results. With benchmark=True, which method runs for a given axis
+        length and kernel size depends on timing (machine load, other processes), so it can change between runs and
+        between data loader workers. Both methods compute the same blur, but their results differ at float32
+        rounding level (relative differences of about 1e-7).
+
+        With benchmark=False, results are identical for the same seeds on any machine, with any number of threads,
+        and on CPU and GPU: the blur is computed as separate multiplications and additions in a fixed order (see
+        _direct_blur_along_axis). The random parameters come from numpy's global RNG (sigma, unless blur_sigma is a
+        number or a callable that uses something else) and from torch's global RNG (which channels are blurred), so
+        seed both.
+
+        bg2 0.3.7 and earlier used torch's convolutions here, whose results depend on the CPU (Intel vs AMD), the
+        number of threads and torch's choice of implementation. The results of this version are bit-identical to
+        theirs when those ran with torch.backends.mkldnn.enabled = False and MKL_CBWR=COMPATIBLE, and differ from
+        their default results at float32 rounding level at most.
         """
         super().__init__()
         self.blur_sigma = blur_sigma
@@ -112,11 +215,12 @@ class GaussianBlurTransform(ImageOnlyTransform):
                 [[sample_scalar(self.blur_sigma, shape, dim=i + 1) for i in range(dims)]
                  for _ in range(sum(dct['apply_to_channel']))] \
                     if not self.synchronize_channels else \
-                    [sample_scalar(self.blur_sigma, shape[i + 1]) for i in range(dims)]
+                    [sample_scalar(self.blur_sigma, shape, dim=i + 1) for i in range(dims)]
         return dct
 
     def _apply_to_image(self, img: torch.Tensor, **params) -> torch.Tensor:
-        if len(params['apply_to_channel']) == 0:
+        if not params['apply_to_channel'].any():
+            # no channel drawn. Blurring an empty selection would crash in pad (and benchmark an empty tensor)
             return img
         dim = len(img.shape[1:])
 
@@ -148,7 +252,7 @@ class GaussianBlurTransform(ImageOnlyTransform):
         return img
 
     def _benchmark_wrapper(self, img: torch.Tensor, sigma: float, dim_to_blur: int):
-        kernel_size = _compute_kernel_size(sigma)
+        kernel_size = _compute_kernel_size(sigma, truncate=DEFAULT_TRUNCATE)  # the kernel blur_dimension builds
         shp = img.shape[dim_to_blur + 1]
         # check if we already benchmarked this
         if shp in self.benchmark_use_fft.keys() and kernel_size in self.benchmark_use_fft[shp].keys():
