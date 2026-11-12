@@ -1,4 +1,4 @@
-from typing import Iterable, Tuple, Union
+from typing import Iterable, Sequence, Tuple, Union
 
 import torch
 import torch.nn.functional as f
@@ -32,6 +32,24 @@ def complex_matmul(a: Tensor, b: Tensor, groups: int = 1) -> Tensor:
     c.real, c.imag = real, imag
 
     return c.view(c.size(0), -1, *c.shape[3:])
+
+
+def irfftn_spatial(spectrum: Tensor, signal_size: Sequence[int]) -> Tensor:
+    """
+    torch.fft.irfftn over all dims from 2 on (the last one holding the one-sided spectrum), returning a signal of
+    size signal_size in those dims.
+
+    On CPU, torch computes a multi-dimensional irfftn as a complex FFT over the leading dims followed by a 1D real one,
+    and that complex FFT gets the half-spectrum dim as its innermost batch dim. For batched 2D transforms in that layout,
+    oneMKL (Intel CPUs) writes past the end of an internal buffer whenever the second dim is more than 16x as long as the
+    first one, e.g. for thin 3D patches, and corrupts the heap (https://github.com/pytorch/pytorch/issues/204586). So on
+    CPU the half-spectrum dim is moved in front of the other spatial dims first. Same result, about the same speed.
+    """
+    dims = tuple(range(2, spectrum.ndim))
+    if spectrum.device.type != 'cpu' or len(dims) < 2:
+        return irfftn(spectrum, s=tuple(signal_size), dim=dims)
+    leading = torch.fft.ifftn(spectrum.movedim(-1, 2).contiguous(), dim=tuple(range(3, spectrum.ndim)))
+    return torch.fft.irfft(leading.movedim(2, -1), n=signal_size[-1], dim=-1)
 
 
 def to_ntuple(val: Union[int, Iterable[int]], n: int) -> Tuple[int, ...]:
@@ -132,7 +150,7 @@ def fft_conv(
 
     kernel_fr.imag *= -1
     output_fr = complex_matmul(signal_fr, kernel_fr, groups=groups)
-    output = irfftn(output_fr, dim=tuple(range(2, signal.ndim)))
+    output = irfftn_spatial(output_fr, signal.shape[2:])
 
     # Remove extra padded values
     crop_slices = (slice(None), slice(None)) + tuple(
